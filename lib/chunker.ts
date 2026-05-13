@@ -45,13 +45,12 @@ function normalizeText(text: string): string {
 
 // Extract text from PDF page by page using pdfjs-dist v5 directly
 export async function extractPdfPages(buffer: Buffer): Promise<PageText[]> {
-  const path = await import('path');
-  const { pathToFileURL } = await import('url');
-  const pdfjsLib = await import('pdfjs-dist/build/pdf.mjs');
+  const pdfjsLib = await import('pdfjs-dist');
 
-  // pdfjs-dist v5 requires a real worker file URL — empty string no longer works
-  const workerPath = path.join(process.cwd(), 'node_modules/pdfjs-dist/build/pdf.worker.mjs');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
+  // Use CDN worker URL — avoids local filesystem path resolution issues on Vercel/serverless.
+  // Version must match the installed pdfjs-dist package (5.7.284).
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://unpkg.com/pdfjs-dist@5.7.284/build/pdf.worker.min.mjs';
 
   const data = new Uint8Array(buffer);
   const loadingTask = pdfjsLib.getDocument({ data, verbosity: 0 });

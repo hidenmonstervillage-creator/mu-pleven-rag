@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
     byDocument.set(docKey, group);
   }
   const deduplicated: SourceChunk[] = [];
-  for (const group of byDocument.values()) {
+  for (const group of Array.from(byDocument.values())) {
     const top2 = group
       .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
       .slice(0, 2);
