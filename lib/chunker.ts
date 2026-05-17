@@ -43,36 +43,25 @@ function normalizeText(text: string): string {
     .trim();
 }
 
-// Extract text from PDF page by page using pdfjs-dist v5 directly
+// Extract text from PDF using unpdf — no worker, safe for serverless/Vercel/Node.js
 export async function extractPdfPages(buffer: Buffer): Promise<PageText[]> {
-  const pdfjsLib = await import('pdfjs-dist');
+  const { extractText } = await import('unpdf');
 
-  // Use CDN worker URL — avoids local filesystem path resolution issues on Vercel/serverless.
-  // Version must match the installed pdfjs-dist package (5.7.284).
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://unpkg.com/pdfjs-dist@5.7.284/build/pdf.worker.min.mjs';
+  const uint8Array = new Uint8Array(buffer);
+  const { text } = await extractText(uint8Array, { mergePages: false });
 
-  const data = new Uint8Array(buffer);
-  const loadingTask = pdfjsLib.getDocument({ data, verbosity: 0 });
-  const doc = await loadingTask.promise;
-
-  const pages: PageText[] = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    const raw = (content.items as Array<{ str: string }>)
-      .map((item) => item.str)
-      .join(' ');
-    // Sanitize first (remove null bytes), then normalise spacing
-    const text = normalizeText(sanitizeText(raw));
-    if (text) {
-      pages.push({ page: i, text });
-    }
-    page.cleanup();
+  if (Array.isArray(text)) {
+    return text
+      .map((pageText, index) => ({
+        page: index + 1,
+        text: normalizeText(sanitizeText(pageText ?? '')),
+      }))
+      .filter((p) => p.text.trim().length > 20);
   }
 
-  await doc.destroy();
-  return pages;
+  // Fallback: single string (older unpdf versions or single-page PDFs)
+  const cleaned = normalizeText(sanitizeText(text as unknown as string));
+  return cleaned.trim().length > 20 ? [{ page: 1, text: cleaned }] : [];
 }
 
 // Extract text from PPTX slide by slide using officeparser
