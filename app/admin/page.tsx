@@ -4,80 +4,277 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { FACULTIES } from '@/lib/faculties';
 import { Faculty, Specialty } from '@/lib/types';
 
-type FileStatus = {
-  file: File;
-  status: 'pending' | 'uploading' | 'success' | 'error';
-  message?: string;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type ClassifyResult = {
+  faculty_id: string;
+  specialty_id: string;
+  subject: string;
+  confidence: number;
+  file_type: 'textbook' | 'lecture';
 };
+
+type FileEntry = {
+  id: number;
+  file: File;
+  // Upload
+  uploadStatus: 'idle' | 'uploading' | 'success' | 'error';
+  uploadMessage?: string;
+  // Auto-classification
+  classifyStatus: 'idle' | 'loading' | 'done' | 'error';
+  classifyResult?: ClassifyResult;
+  // Manual overrides (used when confidence < 0.7 or classify error)
+  manualSubject: string;
+  manualFacultyId: string;
+  manualSpecialtyId: string;
+  manualFileType: 'textbook' | 'lecture';
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const STATUS_ICON: Record<FileStatus['status'], string> = {
-  pending: '⏳',
+// Flat subject → { faculty_id, specialty_id } lookup
+const SUBJECT_LOOKUP = new Map<string, { faculty_id: string; specialty_id: string }>();
+for (const f of FACULTIES) {
+  for (const s of f.specialties) {
+    for (const sub of s.subjects) {
+      if (!SUBJECT_LOOKUP.has(sub)) SUBJECT_LOOKUP.set(sub, { faculty_id: f.id, specialty_id: s.id });
+    }
+  }
+}
+
+// All subjects flat for manual dropdown
+const ALL_SUBJECTS: Array<{ faculty: string; subject: string; faculty_id: string; specialty_id: string }> = [];
+for (const f of FACULTIES) {
+  for (const s of f.specialties) {
+    for (const sub of s.subjects) {
+      ALL_SUBJECTS.push({ faculty: f.name, subject: sub, faculty_id: f.id, specialty_id: s.id });
+    }
+  }
+}
+
+const UPLOAD_ICON: Record<FileEntry['uploadStatus'], string> = {
+  idle: '⏳',
   uploading: '🔄',
   success: '✅',
   error: '❌',
 };
 
+let nextId = 0;
+
+// ─── Sub-components ────────────────────────────────────────────────────────────
+
+function ConfidenceBadge({ result }: { result: ClassifyResult }) {
+  const pct = Math.round(result.confidence * 100);
+  const high = result.confidence >= 0.7;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+        high
+          ? 'bg-green-100 text-green-700 border border-green-200'
+          : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
+      }`}
+    >
+      {high ? '✓' : '?'} {result.subject} · {pct}%
+    </span>
+  );
+}
+
+function ManualOverride({
+  entry,
+  onChange,
+}: {
+  entry: FileEntry;
+  onChange: (id: number, patch: Partial<FileEntry>) => void;
+}) {
+  const handleSubjectChange = (subject: string) => {
+    const lookup = SUBJECT_LOOKUP.get(subject);
+    onChange(entry.id, {
+      manualSubject: subject,
+      manualFacultyId: lookup?.faculty_id ?? '',
+      manualSpecialtyId: lookup?.specialty_id ?? '',
+    });
+  };
+
+  return (
+    <div className="mt-1.5 flex flex-col gap-1.5">
+      <p className="text-xs text-yellow-700 font-medium">
+        Ниска увереност — изберете предмет ръчно:
+      </p>
+      <select
+        value={entry.manualSubject}
+        onChange={(e) => handleSubjectChange(e.target.value)}
+        className="w-full rounded border border-yellow-300 bg-white px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#7B1C1C]"
+      >
+        <option value="">— Изберете предмет —</option>
+        {ALL_SUBJECTS.map((s, i) => (
+          <option key={i} value={s.subject}>
+            {s.subject} ({s.faculty})
+          </option>
+        ))}
+      </select>
+      <div className="flex gap-3">
+        {(['textbook', 'lecture'] as const).map((t) => (
+          <label key={t} className="flex items-center gap-1 cursor-pointer text-xs text-gray-600">
+            <input
+              type="radio"
+              checked={entry.manualFileType === t}
+              onChange={() => onChange(entry.id, { manualFileType: t })}
+              className="accent-[#7B1C1C]"
+            />
+            {t === 'textbook' ? '📚 Учебник' : '🎓 Лекция'}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ────────────────────────────────────────────────────────────
+
 export default function AdminPage() {
+  // Global form state (normal mode)
   const [facultyId, setFacultyId] = useState('');
   const [specialtyId, setSpecialtyId] = useState('');
   const [subject, setSubject] = useState('');
   const [fileType, setFileType] = useState<'textbook' | 'lecture'>('textbook');
-  const [fileStatuses, setFileStatuses] = useState<FileStatus[]>([]);
+
+  // Upload state
+  const [entries, setEntries] = useState<FileEntry[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [summary, setSummary] = useState<{ success: number; failed: number } | null>(null);
+
+  // Mode toggles
+  const [autoMode, setAutoMode] = useState(false);
   const [folderMode, setFolderMode] = useState(false);
+
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // Sync webkitdirectory attribute whenever folderMode changes
-  const applyFolderMode = useCallback((enabled: boolean) => {
-    const el = fileRef.current;
-    if (!el) return;
-    if (enabled) {
-      el.setAttribute('webkitdirectory', '');
-    } else {
-      el.removeAttribute('webkitdirectory');
-    }
-    // Reset selection when switching modes
-    el.value = '';
-    setFileStatuses([]);
-    setSummary(null);
-  }, []);
-
-  useEffect(() => {
-    applyFolderMode(folderMode);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folderMode]);
 
   const selectedFaculty: Faculty | undefined = FACULTIES.find((f) => f.id === facultyId);
   const selectedSpecialty: Specialty | undefined = selectedFaculty?.specialties.find(
     (s) => s.id === specialtyId
   );
 
-  const handleFileChange = () => {
-    const raw = fileRef.current?.files;
-    if (!raw || raw.length === 0) {
-      setFileStatuses([]);
-      setSummary(null);
-      return;
-    }
-    // Keep only PDF / PPTX — silently skip everything else
-    const valid = Array.from(raw).filter((f) => /\.(pdf|pptx)$/i.test(f.name));
-    setFileStatuses(valid.map((file) => ({ file, status: 'pending' })));
+  // Sync webkitdirectory attribute
+  const applyFolderMode = useCallback((enabled: boolean) => {
+    const el = fileRef.current;
+    if (!el) return;
+    if (enabled) el.setAttribute('webkitdirectory', '');
+    else el.removeAttribute('webkitdirectory');
+    el.value = '';
+    setEntries([]);
     setSummary(null);
-  };
+  }, []);
+
+  useEffect(() => { applyFolderMode(folderMode); }, [folderMode, applyFolderMode]);
+
+  // Patch a single entry by id
+  const patchEntry = useCallback((id: number, patch: Partial<FileEntry>) => {
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  }, []);
+
+  // Classify one file and update its entry
+  const classifyFile = useCallback(async (entry: FileEntry) => {
+    patchEntry(entry.id, { classifyStatus: 'loading' });
+    try {
+      const res = await fetch('/api/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: entry.file.name }),
+      });
+      if (!res.ok) throw new Error('API error');
+      const result: ClassifyResult = await res.json();
+      patchEntry(entry.id, {
+        classifyStatus: 'done',
+        classifyResult: result,
+        // Pre-fill manual fields with auto result as fallback
+        manualSubject: result.subject,
+        manualFacultyId: result.faculty_id,
+        manualSpecialtyId: result.specialty_id,
+        manualFileType: result.file_type,
+      });
+    } catch {
+      patchEntry(entry.id, { classifyStatus: 'error' });
+    }
+  }, [patchEntry]);
+
+  const handleFileChange = useCallback(() => {
+    const raw = fileRef.current?.files;
+    if (!raw || raw.length === 0) { setEntries([]); setSummary(null); return; }
+
+    const valid = Array.from(raw).filter((f) => /\.(pdf|pptx)$/i.test(f.name));
+    const newEntries: FileEntry[] = valid.map((file) => ({
+      id: nextId++,
+      file,
+      uploadStatus: 'idle',
+      classifyStatus: 'idle',
+      manualSubject: '',
+      manualFacultyId: '',
+      manualSpecialtyId: '',
+      manualFileType: 'textbook',
+    }));
+
+    setEntries(newEntries);
+    setSummary(null);
+
+    // Kick off parallel classification in auto mode
+    if (autoMode) {
+      newEntries.forEach((e) => classifyFile(e));
+    }
+  }, [autoMode, classifyFile]);
+
+  // Re-classify if auto mode is toggled on after files already selected
+  useEffect(() => {
+    if (autoMode && entries.length > 0) {
+      entries
+        .filter((e) => e.classifyStatus === 'idle')
+        .forEach((e) => classifyFile(e));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoMode]);
+
+  // Resolve upload params for a file entry
+  function resolveParams(entry: FileEntry) {
+    if (!autoMode) {
+      return { fid: facultyId, sid: specialtyId, sub: subject, ft: fileType };
+    }
+    const r = entry.classifyResult;
+    if (r && r.confidence >= 0.7) {
+      return { fid: r.faculty_id, sid: r.specialty_id, sub: r.subject, ft: r.file_type };
+    }
+    return {
+      fid: entry.manualFacultyId,
+      sid: entry.manualSpecialtyId,
+      sub: entry.manualSubject,
+      ft: entry.manualFileType,
+    };
+  }
+
+  const canUpload = useCallback((): boolean => {
+    if (entries.length === 0) return false;
+    if (autoMode) {
+      // All files must have finished classifying
+      const allDone = entries.every((e) => e.classifyStatus !== 'loading' && e.classifyStatus !== 'idle');
+      if (!allDone) return false;
+      // Every file must have a resolvable subject
+      return entries.every((e) => {
+        const p = resolveParams(e);
+        return p.fid && p.sid && p.sub;
+      });
+    }
+    return !!(facultyId && specialtyId && subject);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, autoMode, facultyId, specialtyId, subject]);
 
   const handleUpload = async () => {
-    if (!facultyId || !specialtyId || !subject) {
+    if (!canUpload() || isUploading) return;
+
+    if (!autoMode && (!facultyId || !specialtyId || !subject)) {
       alert('Попълнете всички полета преди качване.');
-      return;
-    }
-    if (fileStatuses.length === 0) {
-      alert('Изберете файлове за качване.');
       return;
     }
 
@@ -86,37 +283,25 @@ export default function AdminPage() {
     let successCount = 0;
     let failCount = 0;
 
-    for (let i = 0; i < fileStatuses.length; i++) {
-      // Mark current file as uploading
-      setFileStatuses((prev) =>
-        prev.map((s, idx) => (idx === i ? { ...s, status: 'uploading' } : s))
-      );
+    for (const entry of entries) {
+      patchEntry(entry.id, { uploadStatus: 'uploading' });
+      const { fid, sid, sub, ft } = resolveParams(entry);
 
       const formData = new FormData();
-      formData.append('file', fileStatuses[i].file);
-      formData.append('facultyId', facultyId);
-      formData.append('specialtyId', specialtyId);
-      formData.append('subject', subject);
-      formData.append('fileType', fileType);
+      formData.append('file', entry.file);
+      formData.append('facultyId', fid);
+      formData.append('specialtyId', sid);
+      formData.append('subject', sub);
+      formData.append('fileType', ft);
 
       try {
         const res = await fetch('/api/ingest', { method: 'POST', body: formData });
         const data = await res.json();
-
         if (!res.ok || !data.success) throw new Error(data.error ?? 'Unknown error');
-
-        setFileStatuses((prev) =>
-          prev.map((s, idx) =>
-            idx === i ? { ...s, status: 'success', message: `${data.chunksCreated} чанка` } : s
-          )
-        );
+        patchEntry(entry.id, { uploadStatus: 'success', uploadMessage: `${data.chunksCreated} чанка` });
         successCount++;
       } catch (err) {
-        setFileStatuses((prev) =>
-          prev.map((s, idx) =>
-            idx === i ? { ...s, status: 'error', message: (err as Error).message } : s
-          )
-        );
+        patchEntry(entry.id, { uploadStatus: 'error', uploadMessage: (err as Error).message });
         failCount++;
       }
     }
@@ -126,10 +311,11 @@ export default function AdminPage() {
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  const doneCount = fileStatuses.filter(
-    (s) => s.status === 'success' || s.status === 'error'
+  const doneCount = entries.filter(
+    (e) => e.uploadStatus === 'success' || e.uploadStatus === 'error'
   ).length;
-  const totalCount = fileStatuses.length;
+  const totalCount = entries.length;
+  const classifyingCount = entries.filter((e) => e.classifyStatus === 'loading').length;
 
   const selectClass =
     'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white';
@@ -138,98 +324,118 @@ export default function AdminPage() {
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12 px-4">
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
         <h1 className="text-2xl font-bold text-[#7B1C1C] mb-1">Качване на материали</h1>
-        <p className="text-sm text-gray-500 mb-8">Административен панел — МУ-Плевен AI Library</p>
+        <p className="text-sm text-gray-500 mb-6">Административен панел — МУ-Плевен AI Library</p>
+
+        {/* ── Auto mode toggle ── */}
+        <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 mb-6">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">🤖 Автоматичен режим</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              AI класифицира предмета по името на файла
+            </p>
+          </div>
+          <button
+            onClick={() => setAutoMode((v) => !v)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              autoMode ? 'bg-[#7B1C1C]' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                autoMode ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
 
         <div className="flex flex-col gap-4">
-          {/* Faculty */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Факултет</label>
-            <select
-              value={facultyId}
-              onChange={(e) => { setFacultyId(e.target.value); setSpecialtyId(''); setSubject(''); }}
-              className={selectClass}
-            >
-              <option value="">— Изберете факултет —</option>
-              {FACULTIES.map((f) => (
-                <option key={f.id} value={f.id}>{f.name}</option>
-              ))}
-            </select>
-          </div>
+          {/* ── Normal mode: faculty / specialty / subject / file type ── */}
+          {!autoMode && (
+            <>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Факултет</label>
+                <select
+                  value={facultyId}
+                  onChange={(e) => { setFacultyId(e.target.value); setSpecialtyId(''); setSubject(''); }}
+                  className={selectClass}
+                >
+                  <option value="">— Изберете факултет —</option>
+                  {FACULTIES.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Specialty */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Специалност</label>
-            <select
-              value={specialtyId}
-              onChange={(e) => { setSpecialtyId(e.target.value); setSubject(''); }}
-              disabled={!selectedFaculty}
-              className={selectClass}
-            >
-              <option value="">— Изберете специалност —</option>
-              {selectedFaculty?.specialties.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Специалност</label>
+                <select
+                  value={specialtyId}
+                  onChange={(e) => { setSpecialtyId(e.target.value); setSubject(''); }}
+                  disabled={!selectedFaculty}
+                  className={selectClass}
+                >
+                  <option value="">— Изберете специалност —</option>
+                  {selectedFaculty?.specialties.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Subject */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Предмет</label>
-            {selectedSpecialty && selectedSpecialty.subjects.length > 0 ? (
-              <select value={subject} onChange={(e) => setSubject(e.target.value)} className={selectClass}>
-                <option value="">— Изберете предмет —</option>
-                {selectedSpecialty.subjects.map((sub) => (
-                  <option key={sub} value={sub}>{sub}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                type="text"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                placeholder="Въведете предмет..."
-                className={selectClass}
-                disabled={!selectedSpecialty}
-              />
-            )}
-          </div>
-
-          {/* File type */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Тип материал</label>
-            <div className="flex gap-3">
-              {(['textbook', 'lecture'] as const).map((type) => (
-                <label key={type} className="flex items-center gap-2 cursor-pointer">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Предмет</label>
+                {selectedSpecialty && selectedSpecialty.subjects.length > 0 ? (
+                  <select value={subject} onChange={(e) => setSubject(e.target.value)} className={selectClass}>
+                    <option value="">— Изберете предмет —</option>
+                    {selectedSpecialty.subjects.map((sub) => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
+                  </select>
+                ) : (
                   <input
-                    type="radio"
-                    value={type}
-                    checked={fileType === type}
-                    onChange={() => setFileType(type)}
-                    className="accent-[#7B1C1C]"
+                    type="text"
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                    placeholder="Въведете предмет..."
+                    className={selectClass}
+                    disabled={!selectedSpecialty}
                   />
-                  <span className="text-sm text-gray-700">
-                    {type === 'textbook' ? '📚 Учебник' : '🎓 Лекция'}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </div>
+                )}
+              </div>
 
-          {/* File picker with mode toggle */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Тип материал</label>
+                <div className="flex gap-3">
+                  {(['textbook', 'lecture'] as const).map((type) => (
+                    <label key={type} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        value={type}
+                        checked={fileType === type}
+                        onChange={() => setFileType(type)}
+                        className="accent-[#7B1C1C]"
+                      />
+                      <span className="text-sm text-gray-700">
+                        {type === 'textbook' ? '📚 Учебник' : '🎓 Лекция'}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── File picker with folder/file toggle ── */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="block text-xs font-semibold text-gray-600">
                 Файлове (PDF или PPTX)
               </label>
-              {/* Toggle: Единичен файл / Папка */}
               <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
                 <button
                   type="button"
                   onClick={() => setFolderMode(false)}
                   className={`px-3 py-1.5 transition-colors ${
-                    !folderMode
-                      ? 'bg-[#7B1C1C] text-white'
-                      : 'bg-white text-gray-500 hover:bg-gray-50'
+                    !folderMode ? 'bg-[#7B1C1C] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
                   }`}
                 >
                   Единичен файл
@@ -238,9 +444,7 @@ export default function AdminPage() {
                   type="button"
                   onClick={() => setFolderMode(true)}
                   className={`px-3 py-1.5 transition-colors border-l border-gray-200 ${
-                    folderMode
-                      ? 'bg-[#7B1C1C] text-white'
-                      : 'bg-white text-gray-500 hover:bg-gray-50'
+                    folderMode ? 'bg-[#7B1C1C] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
                   }`}
                 >
                   Папка
@@ -262,33 +466,63 @@ export default function AdminPage() {
             </p>
           </div>
 
-          {/* File list */}
-          {fileStatuses.length > 0 && (
+          {/* ── File list ── */}
+          {entries.length > 0 && (
             <div className="flex flex-col gap-2">
-              {/* Progress counter */}
+              {/* Progress / classify status */}
               {isUploading && (
                 <p className="text-xs font-semibold text-[#7B1C1C]">
                   {doneCount} / {totalCount} файла качени
                 </p>
               )}
+              {autoMode && classifyingCount > 0 && !isUploading && (
+                <p className="text-xs text-gray-500 animate-pulse">
+                  🤖 Класифициране на {classifyingCount} файл(а)…
+                </p>
+              )}
 
-              <div className="max-h-64 overflow-y-auto flex flex-col gap-1.5 rounded-lg border border-gray-200 p-2 bg-gray-50">
-                {fileStatuses.map((entry, i) => (
+              <div className="max-h-80 overflow-y-auto flex flex-col gap-1.5 rounded-lg border border-gray-200 p-2 bg-gray-50">
+                {entries.map((entry) => (
                   <div
-                    key={i}
-                    className="flex items-start gap-2 text-xs text-gray-700 bg-white rounded-lg px-3 py-2 border border-gray-100"
+                    key={entry.id}
+                    className="flex items-start gap-2 text-xs text-gray-700 bg-white rounded-lg px-3 py-2.5 border border-gray-100"
                   >
                     <span className="flex-shrink-0 mt-0.5 text-sm">
-                      {STATUS_ICON[entry.status]}
+                      {UPLOAD_ICON[entry.uploadStatus]}
                     </span>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{entry.file.name}</p>
                       <p className="text-gray-400">{formatSize(entry.file.size)}</p>
-                      {entry.status === 'success' && entry.message && (
-                        <p className="text-green-600 mt-0.5">{entry.message}</p>
+
+                      {/* Auto-classification result */}
+                      {autoMode && (
+                        <div className="mt-1">
+                          {entry.classifyStatus === 'loading' && (
+                            <span className="text-xs text-gray-400 animate-pulse">🤖 Класифициране…</span>
+                          )}
+                          {entry.classifyStatus === 'done' && entry.classifyResult && (
+                            <>
+                              <ConfidenceBadge result={entry.classifyResult} />
+                              {entry.classifyResult.confidence < 0.7 && (
+                                <ManualOverride entry={entry} onChange={patchEntry} />
+                              )}
+                            </>
+                          )}
+                          {entry.classifyStatus === 'error' && (
+                            <>
+                              <span className="text-xs text-red-500">Неуспешна класификация</span>
+                              <ManualOverride entry={entry} onChange={patchEntry} />
+                            </>
+                          )}
+                        </div>
                       )}
-                      {entry.status === 'error' && entry.message && (
-                        <p className="text-red-600 mt-0.5 break-words">{entry.message}</p>
+
+                      {/* Upload result messages */}
+                      {entry.uploadStatus === 'success' && entry.uploadMessage && (
+                        <p className="text-green-600 mt-0.5">{entry.uploadMessage}</p>
+                      )}
+                      {entry.uploadStatus === 'error' && entry.uploadMessage && (
+                        <p className="text-red-600 mt-0.5 break-words">{entry.uploadMessage}</p>
                       )}
                     </div>
                   </div>
@@ -297,20 +531,22 @@ export default function AdminPage() {
             </div>
           )}
 
-          {/* Upload button */}
+          {/* ── Upload button ── */}
           <button
             onClick={handleUpload}
-            disabled={isUploading || fileStatuses.length === 0}
+            disabled={isUploading || !canUpload()}
             className="w-full py-2.5 bg-[#7B1C1C] text-white rounded-xl font-semibold text-sm hover:bg-[#6a1818] transition-colors disabled:opacity-50 mt-2"
           >
             {isUploading
               ? `Качвам ${doneCount + 1} / ${totalCount}...`
-              : fileStatuses.length > 1
-              ? `Качи и индексирай (${fileStatuses.length} файла)`
+              : classifyingCount > 0
+              ? `Изчакване на класификация…`
+              : entries.length > 1
+              ? `Качи и индексирай (${entries.length} файла)`
               : 'Качи и индексирай'}
           </button>
 
-          {/* Summary */}
+          {/* ── Summary ── */}
           {summary && (
             <div
               className={`rounded-lg px-4 py-3 text-sm font-medium ${
