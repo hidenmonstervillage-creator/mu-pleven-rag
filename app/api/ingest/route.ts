@@ -1,3 +1,33 @@
+// ── Node.js / Vercel polyfills for browser APIs used by pdfjs-dist ──────────
+// These must appear before any pdfjs-dist import (which happens inside chunker.ts).
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).DOMMatrix = class DOMMatrix {
+    constructor() {}
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    static fromMatrix() { return new (globalThis as any).DOMMatrix(); }
+  };
+}
+
+if (typeof globalThis.Path2D === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).Path2D = class Path2D {};
+}
+
+if (typeof globalThis.ImageData === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).ImageData = class ImageData {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(public data: any, public width: number, public height: number) {}
+  };
+}
+
+if (typeof globalThis.CanvasRenderingContext2D === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).CanvasRenderingContext2D = class CanvasRenderingContext2D {};
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase';
 import { embedTexts } from '@/lib/embeddings';
