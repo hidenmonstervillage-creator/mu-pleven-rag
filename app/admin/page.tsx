@@ -3,19 +3,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { FACULTIES } from '@/lib/faculties';
 import { Faculty, Specialty } from '@/lib/types';
-import { supabase } from '@/lib/supabase';
 
-// Mirrors the slug logic in the ingest route — must stay in sync
-function toStorageSlug(text: string): string {
-  const map: Record<string, string> = {
-    а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ж: 'zh', з: 'z',
-    и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p',
-    р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch',
-    ш: 'sh', щ: 'sht', ъ: 'a', ь: '', ю: 'yu', я: 'ya',
-  };
-  return text.toLowerCase().split('').map((c) => map[c] ?? c).join('')
-    .replace(/[^a-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
-}
+const HETZNER_UPLOAD_URL =
+  process.env.NEXT_PUBLIC_HETZNER_UPLOAD_URL ?? 'http://178.105.161.66/upload';
+const HETZNER_API_KEY =
+  process.env.NEXT_PUBLIC_HETZNER_API_KEY ?? 'mup-upload-secret-2024';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -301,21 +293,30 @@ export default function AdminPage() {
       const { fid, sid, sub, ft } = resolveParams(entry);
 
       try {
-        // ── Step 1: upload file directly to Supabase Storage from the browser ──
-        const storageKey = `${fid}/${sid}/${toStorageSlug(sub)}/${toStorageSlug(entry.file.name)}`;
-        const { error: uploadError } = await supabase.storage
-          .from('documents')
-          .upload(storageKey, entry.file, { upsert: true });
-        if (uploadError) throw new Error(`Storage upload: ${uploadError.message}`);
+        // ── Step 1: upload file directly to Hetzner storage server ──
+        const formData = new FormData();
+        formData.append('file', entry.file);
+        formData.append('facultyId', fid);
+        formData.append('specialtyId', sid);
+        formData.append('subject', sub);
 
-        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageKey);
+        const uploadRes = await fetch(HETZNER_UPLOAD_URL, {
+          method: 'POST',
+          headers: { 'x-api-key': HETZNER_API_KEY },
+          body: formData,
+        });
+        if (!uploadRes.ok) {
+          const errBody = await uploadRes.text();
+          throw new Error(`Hetzner upload failed (${uploadRes.status}): ${errBody}`);
+        }
+        const { url: storageUrl } = await uploadRes.json() as { url: string };
 
-        // ── Step 2: send metadata to API — no file bytes cross the Vercel limit ──
+        // ── Step 2: send URL to ingest API — no file bytes cross the Vercel limit ──
         const res = await fetch('/api/ingest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            storageUrl: urlData.publicUrl,
+            storageUrl,
             filename: entry.file.name,
             facultyId: fid,
             specialtyId: sid,
@@ -590,7 +591,7 @@ export default function AdminPage() {
         </div>
 
         <p className="text-xs text-gray-400 mt-6 text-center">
-          Файловете се качват в Supabase Storage и се индексират автоматично с OpenAI embeddings.
+          Файловете се качват на сървъра и се индексират автоматично с OpenAI embeddings.
         </p>
       </div>
     </div>
