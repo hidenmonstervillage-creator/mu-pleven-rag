@@ -9,6 +9,18 @@ const HETZNER_UPLOAD_URL =
 const HETZNER_API_KEY =
   process.env.NEXT_PUBLIC_HETZNER_API_KEY ?? 'mup-upload-secret-2024';
 
+// Transliterate Cyrillic → ASCII slug for Hetzner path segments
+function toStorageSlug(text: string): string {
+  const map: Record<string, string> = {
+    а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ж: 'zh', з: 'z',
+    и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p',
+    р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch',
+    ш: 'sh', щ: 'sht', ъ: 'a', ь: '', ю: 'yu', я: 'ya',
+  };
+  return text.toLowerCase().split('').map((c) => map[c] ?? c).join('')
+    .replace(/[^a-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ClassifyResult = {
@@ -294,11 +306,12 @@ export default function AdminPage() {
 
       try {
         // ── Step 1: upload file directly to Hetzner storage server ──
+        // Use transliterated slugs for path segments so Hetzner gets pure ASCII
         const formData = new FormData();
+        formData.append('facultyId', toStorageSlug(fid));
+        formData.append('specialtyId', toStorageSlug(sid));
+        formData.append('subject', toStorageSlug(sub));
         formData.append('file', entry.file);
-        formData.append('facultyId', fid);
-        formData.append('specialtyId', sid);
-        formData.append('subject', sub);
 
         const uploadRes = await fetch(HETZNER_UPLOAD_URL, {
           method: 'POST',
