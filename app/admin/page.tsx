@@ -108,11 +108,9 @@ function SubjectCombobox({
   // Keep query in sync when parent clears value (faculty/specialty change)
   useEffect(() => { setQuery(value); }, [value]);
 
-  const suggestions = query.trim() === ''
-    ? subjects.slice(0, 8)
-    : subjects
-        .filter((s) => s.toLowerCase().includes(query.toLowerCase()))
-        .slice(0, 8);
+  const suggestions = query.trim()
+    ? subjects.filter((s) => s.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
+    : subjects;
 
   // Close on outside click
   useEffect(() => {
