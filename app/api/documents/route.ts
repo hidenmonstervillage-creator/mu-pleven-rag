@@ -7,34 +7,31 @@ export async function GET() {
   try {
     const supabase = createServiceClient();
 
-    const { data, error } = await supabase
+    // Step 1 — fetch all documents ordered newest first
+    const { data: docs, error } = await supabase
       .from('documents')
-      .select(`
-        id, filename, clean_title, file_type,
-        faculty_id, specialty_id, subject,
-        storage_url, page_count, created_at,
-        chunks(count)
-      `)
+      .select('id, filename, clean_title, file_type, faculty_id, specialty_id, subject, storage_url, page_count, created_at')
       .order('created_at', { ascending: false });
 
     if (error) throw new Error(error.message);
+    if (!docs || docs.length === 0) return NextResponse.json({ documents: [] });
 
-    const documents = (data ?? []).map((doc) => {
-      const chunkArr = doc.chunks as Array<{ count: number }> | null;
-      return {
-        id:            doc.id,
-        filename:      doc.filename,
-        clean_title:   doc.clean_title,
-        file_type:     doc.file_type,
-        faculty_id:    doc.faculty_id,
-        specialty_id:  doc.specialty_id,
-        subject:       doc.subject,
-        storage_url:   doc.storage_url,
-        page_count:    doc.page_count,
-        created_at:    doc.created_at,
-        chunk_count:   chunkArr?.[0]?.count ?? 0,
-      };
-    });
+    // Step 2 — fetch chunk counts for all documents in parallel
+    const counts = await Promise.all(
+      docs.map(async (doc) => {
+        const { count, error: countErr } = await supabase
+          .from('chunks')
+          .select('*', { count: 'exact', head: true })
+          .eq('document_id', doc.id);
+        if (countErr) return 0;
+        return count ?? 0;
+      }),
+    );
+
+    const documents = docs.map((doc, i) => ({
+      ...doc,
+      chunk_count: counts[i],
+    }));
 
     return NextResponse.json({ documents });
   } catch (err) {
