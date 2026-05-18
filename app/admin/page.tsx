@@ -173,6 +173,8 @@ export default function AdminPage() {
   const [folderMode, setFolderMode] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
+  // Mutable ref so we can update the tunnel URL at runtime without re-rendering
+  const tunnelUrlRef = useRef(HETZNER_UPLOAD_URL);
 
   const selectedFaculty: Faculty | undefined = FACULTIES.find((f) => f.id === facultyId);
   const selectedSpecialty: Specialty | undefined = selectedFaculty?.specialties.find(
@@ -316,11 +318,29 @@ export default function AdminPage() {
         formData.append('subject', toStorageSlug(sub));
         formData.append('file', entry.file);
 
-        const uploadRes = await fetch(HETZNER_UPLOAD_URL, {
-          method: 'POST',
-          headers: { 'x-api-key': HETZNER_API_KEY },
-          body: formData,
-        });
+        // ── Upload with auto-retry when the Cloudflare tunnel URL rotates ──
+        const doFetch = (url: string) =>
+          fetch(url, { method: 'POST', headers: { 'x-api-key': HETZNER_API_KEY }, body: formData });
+
+        let uploadRes: Response;
+        try {
+          uploadRes = await doFetch(tunnelUrlRef.current);
+        } catch (fetchErr) {
+          const fetchMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+          if (fetchMsg === 'Failed to fetch') {
+            // Cloudflare tunnel likely rotated — fetch the new URL and retry once
+            patchEntry(entry.id, { uploadStatus: 'uploading', uploadMessage: 'Tunnel URL обновен, опитвам отново...' });
+            try {
+              const txt = await fetch('http://178.105.161.66/tunnel-url.txt').then((r) => r.text());
+              const newBase = txt.trim();
+              if (newBase) tunnelUrlRef.current = newBase + '/upload';
+            } catch { /* keep existing URL and retry anyway */ }
+            uploadRes = await doFetch(tunnelUrlRef.current);
+          } else {
+            throw fetchErr;
+          }
+        }
+
         if (!uploadRes.ok) {
           const errBody = await uploadRes.text();
           throw new Error(`Hetzner upload failed (${uploadRes.status}): ${errBody}`);
@@ -345,7 +365,12 @@ export default function AdminPage() {
         patchEntry(entry.id, { uploadStatus: 'success', uploadMessage: `${data.chunksCreated} чанка` });
         successCount++;
       } catch (err) {
-        patchEntry(entry.id, { uploadStatus: 'error', uploadMessage: (err as Error).message });
+        const errMsg = err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+          ? err
+          : JSON.stringify(err);
+        patchEntry(entry.id, { uploadStatus: 'error', uploadMessage: errMsg });
         failCount++;
       }
     }
@@ -537,6 +562,23 @@ export default function AdminPage() {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{entry.file.name}</p>
                       <p className="text-gray-400">{formatSize(entry.file.size)}</p>
+
+                      {/* Large-file warning */}
+                      {entry.file.size > 100 * 1024 * 1024 &&
+                        (entry.uploadStatus === 'idle' || entry.uploadStatus === 'uploading') && (
+                          <p className="text-yellow-600 mt-0.5">
+                            ⚠️ Файлът е по-голям от 100MB. Cloudflare tunnel може да го откаже.
+                            Препоръчваме компресиране с{' '}
+                            <a
+                              href="https://www.ilovepdf.com/compress_pdf"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline hover:text-yellow-700"
+                            >
+                              ilovepdf.com
+                            </a>
+                          </p>
+                        )}
 
                       {/* Auto-classification result */}
                       {autoMode && (
