@@ -48,14 +48,12 @@ function xhrUpload(
     xhr.open('POST', url);
     xhr.setRequestHeader('x-api-key', apiKey);
 
-    // Track upload bytes as they leave the browser
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         onProgress(Math.round((event.loaded / event.total) * 100));
       }
     };
 
-    // Any completed HTTP response (including 4xx/5xx) — caller inspects .ok
     xhr.onload = () => {
       const responseText = xhr.responseText;
       resolve({
@@ -69,11 +67,7 @@ function xhrUpload(
       });
     };
 
-    // Network-level failure (no response) — same message as fetch() so the
-    // 'Failed to fetch' tunnel-retry check in handleUpload still fires
-    xhr.onerror = () => reject(new Error('Failed to fetch'));
-
-    // Timeout (we don't set xhr.timeout, but guard it anyway)
+    xhr.onerror   = () => reject(new Error('Failed to fetch'));
     xhr.ontimeout = () => reject(new Error('Upload timed out'));
 
     xhr.send(formData);
@@ -106,11 +100,13 @@ type ClassifyResult = {
   file_type: 'textbook' | 'lecture';
 };
 
+type UploadStatus = 'idle' | 'uploading' | 'success' | 'error' | 'duplicate' | 'skipped';
+
 type FileEntry = {
   id: number;
   file: File;
   // Upload
-  uploadStatus: 'idle' | 'uploading' | 'success' | 'error';
+  uploadStatus: UploadStatus;
   uploadMessage?: string;
   // Auto-classification
   classifyStatus: 'idle' | 'loading' | 'done' | 'error';
@@ -160,11 +156,13 @@ const SPECIALTY_NAME = new Map(
   FACULTIES.flatMap((f) => f.specialties.map((s) => [s.id, s.name]))
 );
 
-const UPLOAD_ICON: Record<FileEntry['uploadStatus'], string> = {
-  idle: '⏳',
+const UPLOAD_ICON: Record<UploadStatus, string> = {
+  idle:      '⏳',
   uploading: '🔄',
-  success: '✅',
-  error: '❌',
+  success:   '✅',
+  error:     '❌',
+  duplicate: '⚠️',
+  skipped:   '⏭️',
 };
 
 let nextId = 0;
@@ -188,14 +186,12 @@ function SubjectCombobox({
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Keep query in sync when parent clears value (faculty/specialty change)
   useEffect(() => { setQuery(value); }, [value]);
 
   const suggestions = query.trim()
     ? subjects.filter((s) => s.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
     : subjects;
 
-  // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
@@ -338,9 +334,13 @@ export default function AdminPage() {
   // Upload state
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [summary, setSummary] = useState<{ success: number; failed: number } | null>(null);
+  const [summary, setSummary] = useState<{
+    success: number;
+    failed: number;
+    skipped: number;
+  } | null>(null);
 
-  // Per-file upload progress: keyed by FileEntry.id, value 0–100
+  // Per-file upload progress (0–100), keyed by FileEntry.id
   const [uploadProgress, setUploadProgress] = useState<Record<number, number>>({});
 
   // Documents list state
@@ -355,8 +355,13 @@ export default function AdminPage() {
   const [folderMode, setFolderMode] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
-  // Mutable ref so we can update the tunnel URL at runtime without re-rendering
+
+  // Mutable ref — updated without re-render when tunnel URL rotates
   const tunnelUrlRef = useRef(HETZNER_UPLOAD_URL);
+
+  // Duplicate-confirmation gates: entry.id → resolve(proceed: boolean)
+  // The file's upload promise parks here while waiting for the user's click.
+  const confirmCallbacksRef = useRef<Map<number, (proceed: boolean) => void>>(new Map());
 
   // ── Fetch all documents from /api/documents ───────────────────────────────
   const fetchDocuments = useCallback(async () => {
@@ -399,7 +404,6 @@ export default function AdminPage() {
     (s) => s.id === specialtyId
   );
 
-  // Sync webkitdirectory attribute
   const applyFolderMode = useCallback((enabled: boolean) => {
     const el = fileRef.current;
     if (!el) return;
@@ -412,12 +416,10 @@ export default function AdminPage() {
 
   useEffect(() => { applyFolderMode(folderMode); }, [folderMode, applyFolderMode]);
 
-  // Patch a single entry by id
   const patchEntry = useCallback((id: number, patch: Partial<FileEntry>) => {
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   }, []);
 
-  // Classify one file and update its entry
   const classifyFile = useCallback(async (entry: FileEntry) => {
     patchEntry(entry.id, { classifyStatus: 'loading' });
     try {
@@ -431,11 +433,10 @@ export default function AdminPage() {
       patchEntry(entry.id, {
         classifyStatus: 'done',
         classifyResult: result,
-        // Pre-fill manual fields with auto result as fallback
-        manualSubject: result.subject,
-        manualFacultyId: result.faculty_id,
+        manualSubject:     result.subject,
+        manualFacultyId:   result.faculty_id,
         manualSpecialtyId: result.specialty_id,
-        manualFileType: result.file_type,
+        manualFileType:    result.file_type,
       });
     } catch {
       patchEntry(entry.id, { classifyStatus: 'error' });
@@ -450,34 +451,27 @@ export default function AdminPage() {
     const newEntries: FileEntry[] = valid.map((file) => ({
       id: nextId++,
       file,
-      uploadStatus: 'idle',
-      classifyStatus: 'idle',
-      manualSubject: '',
+      uploadStatus:    'idle',
+      classifyStatus:  'idle',
+      manualSubject:   '',
       manualFacultyId: '',
       manualSpecialtyId: '',
-      manualFileType: 'textbook',
+      manualFileType:  'textbook',
     }));
 
     setEntries(newEntries);
     setSummary(null);
 
-    // Kick off parallel classification in auto mode
-    if (autoMode) {
-      newEntries.forEach((e) => classifyFile(e));
-    }
+    if (autoMode) newEntries.forEach((e) => classifyFile(e));
   }, [autoMode, classifyFile]);
 
-  // Re-classify if auto mode is toggled on after files already selected
   useEffect(() => {
     if (autoMode && entries.length > 0) {
-      entries
-        .filter((e) => e.classifyStatus === 'idle')
-        .forEach((e) => classifyFile(e));
+      entries.filter((e) => e.classifyStatus === 'idle').forEach((e) => classifyFile(e));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoMode]);
 
-  // Resolve upload params for a file entry
   function resolveParams(entry: FileEntry) {
     if (!autoMode) {
       return { fid: facultyId, sid: specialtyId, sub: subject, ft: fileType };
@@ -490,17 +484,17 @@ export default function AdminPage() {
       fid: entry.manualFacultyId,
       sid: entry.manualSpecialtyId,
       sub: entry.manualSubject,
-      ft: entry.manualFileType,
+      ft:  entry.manualFileType,
     };
   }
 
   const canUpload = useCallback((): boolean => {
     if (entries.length === 0) return false;
     if (autoMode) {
-      // All files must have finished classifying
-      const allDone = entries.every((e) => e.classifyStatus !== 'loading' && e.classifyStatus !== 'idle');
+      const allDone = entries.every(
+        (e) => e.classifyStatus !== 'loading' && e.classifyStatus !== 'idle'
+      );
       if (!allDone) return false;
-      // Every file must have a resolvable subject
       return entries.every((e) => {
         const p = resolveParams(e);
         return p.fid && p.sid && p.sub;
@@ -510,9 +504,23 @@ export default function AdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, autoMode, facultyId, specialtyId, subject]);
 
+  // ── Upload handler ─────────────────────────────────────────────────────────
+  //
+  // Duplicate detection strategy: CLIENT-SIDE filtering of the `documents`
+  // state snapshot (already loaded on mount, refreshed after each batch).
+  // This avoids extra API calls and query-param changes to /api/documents.
+  // The snapshot is taken once when handleUpload is called; documents uploaded
+  // within the current batch are NOT in this snapshot, preventing false
+  // positives between sibling files in the same run.
+  //
+  // All files run in parallel via Promise.all. A file that finds a duplicate
+  // parks in 'duplicate' status, awaiting a Promise<boolean> whose resolver is
+  // stored in confirmCallbacksRef. The "Да"/"Не" buttons in the UI call that
+  // resolver, unblocking only that file's async chain while all other files
+  // continue unaffected.
+
   const handleUpload = async () => {
     if (!canUpload() || isUploading) return;
-
     if (!autoMode && (!facultyId || !specialtyId || !subject)) {
       alert('Попълнете всички полета преди качване.');
       return;
@@ -520,50 +528,75 @@ export default function AdminPage() {
 
     setIsUploading(true);
     setSummary(null);
-    setUploadProgress({});    // clear any leftover progress from a previous run
-    let successCount = 0;
-    let failCount = 0;
+    setUploadProgress({});
 
-    for (const entry of entries) {
-      patchEntry(entry.id, { uploadStatus: 'uploading', uploadMessage: undefined });
-      // Initialise progress to 0 so the bar appears immediately
-      setUploadProgress((prev) => ({ ...prev, [entry.id]: 0 }));
+    // Capture current documents snapshot for duplicate checks
+    const docsSnapshot = documents;
 
+    // Upload one file; returns 'success' | 'error' | 'skipped'
+    const uploadOne = async (entry: FileEntry): Promise<'success' | 'error' | 'skipped'> => {
       const { fid, sid, sub, ft } = resolveParams(entry);
 
-      try {
-        // ── Step 1: upload file directly to Hetzner storage server ──
-        // Use transliterated slugs for path segments so Hetzner gets pure ASCII
-        const formData = new FormData();
-        formData.append('facultyId', toStorageSlug(fid));
-        formData.append('specialtyId', toStorageSlug(sid));
-        formData.append('subject', toStorageSlug(sub));
-        formData.append('file', entry.file);
+      // ── Duplicate check (client-side against snapshot) ─────────────────────
+      const isDuplicate = docsSnapshot.some(
+        (doc) =>
+          doc.filename.trim().toLowerCase() === entry.file.name.trim().toLowerCase() &&
+          doc.faculty_id  === fid &&
+          doc.specialty_id === sid &&
+          doc.subject      === sub
+      );
 
-        // Helper: XHR upload with live progress, returns a fetch-compatible response object
+      if (isDuplicate) {
+        // Park the file — UI renders the confirmation badge
+        patchEntry(entry.id, { uploadStatus: 'duplicate', uploadMessage: undefined });
+
+        const proceed = await new Promise<boolean>((resolve) => {
+          confirmCallbacksRef.current.set(entry.id, resolve);
+        });
+        confirmCallbacksRef.current.delete(entry.id);
+
+        if (!proceed) {
+          patchEntry(entry.id, { uploadStatus: 'skipped', uploadMessage: 'Пропуснат' });
+          return 'skipped';
+        }
+
+        // User said "Да" — reset to uploading state and continue
+        patchEntry(entry.id, { uploadStatus: 'uploading', uploadMessage: undefined });
+        setUploadProgress((prev) => ({ ...prev, [entry.id]: 0 }));
+      } else {
+        patchEntry(entry.id, { uploadStatus: 'uploading', uploadMessage: undefined });
+        setUploadProgress((prev) => ({ ...prev, [entry.id]: 0 }));
+      }
+
+      try {
+        // ── Step 1: upload file to Hetzner ──────────────────────────────────
+        const formData = new FormData();
+        formData.append('facultyId',   toStorageSlug(fid));
+        formData.append('specialtyId', toStorageSlug(sid));
+        formData.append('subject',     toStorageSlug(sub));
+        formData.append('file',        entry.file);
+
         const doXhr = (url: string) =>
           xhrUpload(url, formData, HETZNER_API_KEY, (pct) => {
             setUploadProgress((prev) => ({ ...prev, [entry.id]: pct }));
           });
 
-        // ── Upload with auto-retry when the Cloudflare tunnel URL rotates ──
-        // xhr.onerror rejects with Error('Failed to fetch') — same as fetch(),
-        // so this retry branch fires identically to before.
         let uploadRes: XHRResponse;
         try {
           uploadRes = await doXhr(tunnelUrlRef.current);
         } catch (fetchErr) {
           const fetchMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
           if (fetchMsg === 'Failed to fetch') {
-            // Cloudflare tunnel likely rotated — fetch the new URL and retry once
-            patchEntry(entry.id, { uploadStatus: 'uploading', uploadMessage: 'Tunnel URL обновен, опитвам отново...' });
-            // Reset progress for retry
+            patchEntry(entry.id, {
+              uploadStatus:  'uploading',
+              uploadMessage: 'Tunnel URL обновен, опитвам отново...',
+            });
             setUploadProgress((prev) => ({ ...prev, [entry.id]: 0 }));
             try {
               const txt = await fetch('http://178.105.161.66/tunnel-url.txt').then((r) => r.text());
               const newBase = txt.trim();
               if (newBase) tunnelUrlRef.current = newBase + '/upload';
-            } catch { /* keep existing URL and retry anyway */ }
+            } catch { /* keep existing URL */ }
             uploadRes = await doXhr(tunnelUrlRef.current);
           } else {
             throw fetchErr;
@@ -576,23 +609,28 @@ export default function AdminPage() {
         }
         const { url: storageUrl } = await uploadRes.json() as { url: string };
 
-        // ── Step 2: send URL to ingest API — no file bytes cross the Vercel limit ──
+        // ── Step 2: ingest (embed + index) ───────────────────────────────────
         const res = await fetch('/api/ingest', {
-          method: 'POST',
+          method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             storageUrl,
-            filename: entry.file.name,
-            facultyId: fid,
+            filename:    entry.file.name,
+            facultyId:   fid,
             specialtyId: sid,
-            subject: sub,
-            fileType: ft,
+            subject:     sub,
+            fileType:    ft,
           }),
         });
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error ?? 'Unknown error');
-        patchEntry(entry.id, { uploadStatus: 'success', uploadMessage: `${data.chunksCreated} чанка` });
-        successCount++;
+
+        patchEntry(entry.id, {
+          uploadStatus:  'success',
+          uploadMessage: `${data.chunksCreated} чанка`,
+        });
+        return 'success';
+
       } catch (err) {
         const errMsg = err instanceof Error
           ? err.message
@@ -600,21 +638,35 @@ export default function AdminPage() {
           ? err
           : JSON.stringify(err);
         patchEntry(entry.id, { uploadStatus: 'error', uploadMessage: errMsg });
-        failCount++;
+        return 'error';
       }
-    }
+    };
+
+    // Run all files in parallel — duplicates gate independently, others proceed
+    const results = await Promise.all(entries.map(uploadOne));
 
     setIsUploading(false);
-    setSummary({ success: successCount, failed: failCount });
+    setSummary({
+      success: results.filter((r) => r === 'success').length,
+      failed:  results.filter((r) => r === 'error').length,
+      skipped: results.filter((r) => r === 'skipped').length,
+    });
     if (fileRef.current) fileRef.current.value = '';
-    // Refresh the documents list to show newly uploaded files
     fetchDocuments();
   };
 
+  // Resolve/reject a duplicate confirmation for a specific entry
+  const confirmDuplicate = useCallback((entryId: number, proceed: boolean) => {
+    confirmCallbacksRef.current.get(entryId)?.(proceed);
+  }, []);
+
   const doneCount = entries.filter(
-    (e) => e.uploadStatus === 'success' || e.uploadStatus === 'error'
+    (e) =>
+      e.uploadStatus === 'success' ||
+      e.uploadStatus === 'error'   ||
+      e.uploadStatus === 'skipped'
   ).length;
-  const totalCount = entries.length;
+  const totalCount      = entries.length;
   const classifyingCount = entries.filter((e) => e.classifyStatus === 'loading').length;
 
   const selectClass =
@@ -649,7 +701,7 @@ export default function AdminPage() {
         </div>
 
         <div className="flex flex-col gap-4">
-          {/* ── Normal mode: faculty / specialty / subject / file type ── */}
+          {/* ── Normal mode selectors ── */}
           {!autoMode && (
             <>
               <div>
@@ -713,7 +765,7 @@ export default function AdminPage() {
             </>
           )}
 
-          {/* ── File picker with folder/file toggle ── */}
+          {/* ── File picker ── */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="block text-xs font-semibold text-gray-600">
@@ -758,10 +810,9 @@ export default function AdminPage() {
           {/* ── File list ── */}
           {entries.length > 0 && (
             <div className="flex flex-col gap-2">
-              {/* Progress / classify status */}
               {isUploading && (
                 <p className="text-xs font-semibold text-[#7B1C1C]">
-                  {doneCount} / {totalCount} файла качени
+                  {doneCount} / {totalCount} файла обработени
                 </p>
               )}
               {autoMode && classifyingCount > 0 && !isUploading && (
@@ -772,8 +823,9 @@ export default function AdminPage() {
 
               <div className="max-h-80 overflow-y-auto flex flex-col gap-1.5 rounded-lg border border-gray-200 p-2 bg-gray-50">
                 {entries.map((entry) => {
-                  const pct = uploadProgress[entry.id] ?? 0;
+                  const pct     = uploadProgress[entry.id] ?? 0;
                   const showBar = entry.uploadStatus === 'uploading';
+
                   return (
                     <div
                       key={entry.id}
@@ -786,7 +838,7 @@ export default function AdminPage() {
                         <p className="font-medium truncate">{entry.file.name}</p>
                         <p className="text-gray-400">{formatSize(entry.file.size)}</p>
 
-                        {/* ── Per-file progress bar (visible only while uploading) ── */}
+                        {/* Progress bar — shown only while uploading */}
                         {showBar && (
                           <div className="mt-1.5 flex items-center gap-2">
                             <div className="flex-1 bg-gray-200 rounded-full h-1 overflow-hidden">
@@ -798,6 +850,27 @@ export default function AdminPage() {
                             <span className="text-gray-500 tabular-nums w-7 text-right">
                               {pct}%
                             </span>
+                          </div>
+                        )}
+
+                        {/* Duplicate confirmation badge */}
+                        {entry.uploadStatus === 'duplicate' && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                            <span className="bg-yellow-100 border border-yellow-400 text-yellow-900 rounded px-2 py-1 text-xs">
+                              Вече качен — качи отново?
+                            </span>
+                            <button
+                              onClick={() => confirmDuplicate(entry.id, true)}
+                              className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 transition-colors"
+                            >
+                              Да
+                            </button>
+                            <button
+                              onClick={() => confirmDuplicate(entry.id, false)}
+                              className="text-xs bg-gray-300 text-gray-700 px-2 py-1 rounded hover:bg-gray-400 transition-colors"
+                            >
+                              Не
+                            </button>
                           </div>
                         )}
 
@@ -845,6 +918,9 @@ export default function AdminPage() {
                         {entry.uploadStatus === 'success' && entry.uploadMessage && (
                           <p className="text-green-600 mt-0.5">{entry.uploadMessage}</p>
                         )}
+                        {entry.uploadStatus === 'skipped' && (
+                          <p className="text-gray-500 mt-0.5">Пропуснат</p>
+                        )}
                         {entry.uploadStatus === 'error' && entry.uploadMessage && (
                           <p className="text-red-600 mt-0.5 break-words">{entry.uploadMessage}</p>
                         )}
@@ -863,9 +939,9 @@ export default function AdminPage() {
             className="w-full py-2.5 bg-[#7B1C1C] text-white rounded-xl font-semibold text-sm hover:bg-[#6a1818] transition-colors disabled:opacity-50 mt-2"
           >
             {isUploading
-              ? `Качвам ${doneCount + 1} / ${totalCount}...`
+              ? `Обработени ${doneCount} / ${totalCount}…`
               : classifyingCount > 0
-              ? `Изчакване на класификация…`
+              ? 'Изчакване на класификация…'
               : entries.length > 1
               ? `Качи и индексирай (${entries.length} файла)`
               : 'Качи и индексирай'}
@@ -877,12 +953,13 @@ export default function AdminPage() {
               className={`rounded-lg px-4 py-3 text-sm font-medium ${
                 summary.failed === 0
                   ? 'bg-green-50 text-green-700 border border-green-200'
-                  : summary.success === 0
+                  : summary.success === 0 && summary.skipped === 0
                   ? 'bg-red-50 text-red-700 border border-red-200'
                   : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
               }`}
             >
               Завършено: {summary.success} успешни, {summary.failed} неуспешни
+              {summary.skipped > 0 && `, ${summary.skipped} пропуснати`}
             </div>
           )}
         </div>
@@ -926,28 +1003,24 @@ export default function AdminPage() {
           />
         </div>
 
-        {/* Loading */}
         {docsLoading && (
           <div className="flex items-center justify-center py-12 text-gray-400 text-sm gap-2">
             <span className="animate-spin text-lg">⏳</span> Зареждане…
           </div>
         )}
 
-        {/* Error */}
         {!docsLoading && docsError && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
             Грешка при зареждане: {docsError}
           </div>
         )}
 
-        {/* Empty state */}
         {!docsLoading && !docsError && documents.length === 0 && (
           <div className="text-center py-12 text-gray-400 text-sm">
             Все още няма качени материали.
           </div>
         )}
 
-        {/* Table */}
         {!docsLoading && !docsError && documents.length > 0 && (() => {
           const q = filterText.trim().toLowerCase();
           const filtered = q
