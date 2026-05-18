@@ -24,6 +24,22 @@ function toStorageSlug(text: string): string {
     .replace(/[^a-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
+// ─── Document row type (returned by /api/documents) ──────────────────────────
+
+type DocumentRow = {
+  id: string;
+  filename: string;
+  clean_title: string;
+  file_type: 'textbook' | 'lecture';
+  faculty_id: string;
+  specialty_id: string;
+  subject: string;
+  storage_url: string;
+  page_count: number;
+  created_at: string;
+  chunk_count: number;
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ClassifyResult = {
@@ -57,6 +73,11 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+
 // Flat subject → { faculty_id, specialty_id } lookup
 const SUBJECT_LOOKUP = new Map<string, { faculty_id: string; specialty_id: string }>();
 for (const f of FACULTIES) {
@@ -76,6 +97,12 @@ for (const f of FACULTIES) {
     }
   }
 }
+
+// Fast id → human name lookups for the documents table
+const FACULTY_NAME = new Map(FACULTIES.map((f) => [f.id, f.name]));
+const SPECIALTY_NAME = new Map(
+  FACULTIES.flatMap((f) => f.specialties.map((s) => [s.id, s.name]))
+);
 
 const UPLOAD_ICON: Record<FileEntry['uploadStatus'], string> = {
   idle: '⏳',
@@ -258,6 +285,13 @@ export default function AdminPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [summary, setSummary] = useState<{ success: number; failed: number } | null>(null);
 
+  // Documents list state
+  const [documents, setDocuments]     = useState<DocumentRow[]>([]);
+  const [docsLoading, setDocsLoading] = useState(true);
+  const [docsError, setDocsError]     = useState<string | null>(null);
+  const [filterText, setFilterText]   = useState('');
+  const [deletingId, setDeletingId]   = useState<string | null>(null);
+
   // Mode toggles
   const [autoMode, setAutoMode] = useState(false);
   const [folderMode, setFolderMode] = useState(false);
@@ -265,6 +299,42 @@ export default function AdminPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   // Mutable ref so we can update the tunnel URL at runtime without re-rendering
   const tunnelUrlRef = useRef(HETZNER_UPLOAD_URL);
+
+  // ── Fetch all documents from /api/documents ───────────────────────────────
+  const fetchDocuments = useCallback(async () => {
+    setDocsLoading(true);
+    setDocsError(null);
+    try {
+      const res = await fetch('/api/documents');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { documents: rows } = await res.json() as { documents: DocumentRow[] };
+      setDocuments(rows);
+    } catch (err) {
+      setDocsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDocsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchDocuments(); }, [fetchDocuments]);
+
+  // ── Delete a document ─────────────────────────────────────────────────────
+  const handleDelete = useCallback(async (doc: DocumentRow) => {
+    if (!confirm(`Сигурни ли сте, че искате да изтриете "${doc.clean_title}"? Това ще изтрие и всички чанкове.`)) return;
+    setDeletingId(doc.id);
+    try {
+      const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
+    } catch (err) {
+      alert('Грешка при изтриване: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setDeletingId(null);
+    }
+  }, []);
 
   const selectedFaculty: Faculty | undefined = FACULTIES.find((f) => f.id === facultyId);
   const selectedSpecialty: Specialty | undefined = selectedFaculty?.specialties.find(
@@ -468,6 +538,8 @@ export default function AdminPage() {
     setIsUploading(false);
     setSummary({ success: successCount, failed: failCount });
     if (fileRef.current) fileRef.current.value = '';
+    // Refresh the documents list to show newly uploaded files
+    fetchDocuments();
   };
 
   const doneCount = entries.filter(
@@ -730,6 +802,146 @@ export default function AdminPage() {
         <p className="text-xs text-gray-400 mt-6 text-center">
           Файловете се качват на сървъра и се индексират автоматично с OpenAI embeddings.
         </p>
+      </div>
+
+      {/* ══ Documents management section ══════════════════════════════════════ */}
+      <div className="w-full max-w-6xl mt-8 bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-xl font-bold text-[#7B1C1C]">Качени материали</h2>
+            {!docsLoading && !docsError && (
+              <p className="text-xs text-gray-400 mt-0.5">
+                Общо {documents.length} материала,{' '}
+                {documents.reduce((s, d) => s + d.chunk_count, 0)} чанка
+              </p>
+            )}
+          </div>
+          <button
+            onClick={fetchDocuments}
+            disabled={docsLoading}
+            className="text-xs text-gray-500 hover:text-[#7B1C1C] disabled:opacity-40 flex items-center gap-1 transition-colors"
+            title="Обнови списъка"
+          >
+            <span className={docsLoading ? 'animate-spin inline-block' : ''}>↻</span>
+            Обнови
+          </button>
+        </div>
+
+        {/* Filter bar */}
+        <div className="mb-4">
+          <input
+            type="text"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            placeholder="Филтрирайте по заглавие, факултет, специалност или предмет..."
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white"
+          />
+        </div>
+
+        {/* Loading */}
+        {docsLoading && (
+          <div className="flex items-center justify-center py-12 text-gray-400 text-sm gap-2">
+            <span className="animate-spin text-lg">⏳</span> Зареждане…
+          </div>
+        )}
+
+        {/* Error */}
+        {!docsLoading && docsError && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+            Грешка при зареждане: {docsError}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!docsLoading && !docsError && documents.length === 0 && (
+          <div className="text-center py-12 text-gray-400 text-sm">
+            Все още няма качени материали.
+          </div>
+        )}
+
+        {/* Table */}
+        {!docsLoading && !docsError && documents.length > 0 && (() => {
+          const q = filterText.trim().toLowerCase();
+          const filtered = q
+            ? documents.filter((d) =>
+                d.clean_title.toLowerCase().includes(q) ||
+                (FACULTY_NAME.get(d.faculty_id) ?? d.faculty_id).toLowerCase().includes(q) ||
+                (SPECIALTY_NAME.get(d.specialty_id) ?? d.specialty_id).toLowerCase().includes(q) ||
+                d.subject.toLowerCase().includes(q)
+              )
+            : documents;
+
+          return (
+            <>
+              {q && (
+                <p className="text-xs text-gray-400 mb-2">
+                  {filtered.length} резултата от {documents.length}
+                </p>
+              )}
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {['Заглавие', 'Факултет', 'Специалност', 'Предмет', 'Тип', 'Чанки', 'Дата', ''].map((h) => (
+                        <th key={h} className="px-3 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filtered.map((doc) => (
+                      <tr key={doc.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-3 py-2.5 max-w-[220px]">
+                          <p className="font-medium text-gray-800 truncate" title={doc.clean_title}>
+                            {doc.clean_title}
+                          </p>
+                          <p className="text-xs text-gray-400 truncate" title={doc.filename}>
+                            {doc.filename}
+                          </p>
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap text-xs">
+                          {FACULTY_NAME.get(doc.faculty_id) ?? doc.faculty_id}
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap text-xs">
+                          {SPECIALTY_NAME.get(doc.specialty_id) ?? doc.specialty_id}
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600 text-xs max-w-[140px]">
+                          <span className="truncate block" title={doc.subject}>{doc.subject}</span>
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                          {doc.file_type === 'textbook' ? '📚 Учебник' : '🎓 Лекция'}
+                        </td>
+                        <td className="px-3 py-2.5 text-center text-xs text-gray-600">
+                          {doc.chunk_count}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">
+                          {formatDate(doc.created_at)}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <button
+                            onClick={() => handleDelete(doc)}
+                            disabled={deletingId === doc.id}
+                            title="Изтрий"
+                            className="text-red-400 hover:text-red-600 disabled:opacity-40 transition-colors p-1 rounded hover:bg-red-50"
+                          >
+                            {deletingId === doc.id ? (
+                              <span className="animate-spin inline-block text-base">⏳</span>
+                            ) : (
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          );
+        })()}
       </div>
     </div>
   );
