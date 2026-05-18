@@ -343,6 +343,10 @@ export default function AdminPage() {
   // Per-file upload progress (0–100), keyed by FileEntry.id
   const [uploadProgress, setUploadProgress] = useState<Record<number, number>>({});
 
+  // "Apply to all" inline feedback message
+  const [applyAllMsg, setApplyAllMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const applyAllTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Documents list state
   const [documents, setDocuments]     = useState<DocumentRow[]>([]);
   const [docsLoading, setDocsLoading] = useState(true);
@@ -503,6 +507,42 @@ export default function AdminPage() {
     return !!(facultyId && specialtyId && subject);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, autoMode, facultyId, specialtyId, subject]);
+
+  // ── "Приложи към всички" ───────────────────────────────────────────────────
+  // Copies the current global faculty/specialty/subject into every entry's
+  // manual fields. Only visible in manual mode with ≥ 2 files. Locked once
+  // any upload has started (any entry leaves 'idle' status).
+
+  // True when every entry in the queue is still in its pre-upload idle state
+  const allEntriesIdle = entries.length > 0 && entries.every((e) => e.uploadStatus === 'idle');
+
+  const showApplyAll = !autoMode && entries.length >= 2;
+
+  const showApplyAllInline = (type: 'ok' | 'err', text: string, ttlMs: number) => {
+    if (applyAllTimerRef.current !== null) clearTimeout(applyAllTimerRef.current);
+    setApplyAllMsg({ type, text });
+    applyAllTimerRef.current = setTimeout(() => {
+      setApplyAllMsg(null);
+      applyAllTimerRef.current = null;
+    }, ttlMs);
+  };
+
+  const handleApplyAll = useCallback(() => {
+    if (!facultyId || !specialtyId || !subject) {
+      showApplyAllInline('err', 'Избери факултет, специалност и предмет първо', 3000);
+      return;
+    }
+    setEntries((prev) =>
+      prev.map((e) => ({
+        ...e,
+        manualFacultyId:   facultyId,
+        manualSpecialtyId: specialtyId,
+        manualSubject:     subject,
+      }))
+    );
+    showApplyAllInline('ok', `Приложено към ${entries.length} файла`, 2000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facultyId, specialtyId, subject, entries.length]);
 
   // ── Upload handler ─────────────────────────────────────────────────────────
   //
@@ -733,14 +773,51 @@ export default function AdminPage() {
                 </select>
               </div>
 
+              {/* Subject row — combobox + "Apply to all" button on the same line */}
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Предмет</label>
-                <SubjectCombobox
-                  subjects={selectedSpecialty?.subjects ?? []}
-                  value={subject}
-                  onChange={setSubject}
-                  disabled={!selectedSpecialty}
-                />
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <SubjectCombobox
+                      subjects={selectedSpecialty?.subjects ?? []}
+                      value={subject}
+                      onChange={setSubject}
+                      disabled={!selectedSpecialty}
+                    />
+                  </div>
+
+                  {/* "Apply to all" button — only when ≥ 2 files in queue */}
+                  {showApplyAll && (
+                    <button
+                      type="button"
+                      onClick={handleApplyAll}
+                      disabled={!allEntriesIdle}
+                      title={
+                        !allEntriesIdle
+                          ? 'Не може да се промени по време на качване'
+                          : 'Приложи текущия факултет, специалност и предмет към всички файлове'
+                      }
+                      className={`flex-shrink-0 border border-gray-300 bg-white text-sm px-3 py-2 rounded-lg transition-colors whitespace-nowrap ${
+                        allEntriesIdle
+                          ? 'text-gray-700 hover:bg-gray-50 cursor-pointer'
+                          : 'opacity-50 cursor-not-allowed pointer-events-none text-gray-400'
+                      }`}
+                    >
+                      Приложи към всички
+                    </button>
+                  )}
+                </div>
+
+                {/* Inline feedback message (error or confirmation) */}
+                {applyAllMsg && (
+                  <p
+                    className={`mt-1.5 text-xs ${
+                      applyAllMsg.type === 'ok' ? 'text-green-600' : 'text-red-600'
+                    }`}
+                  >
+                    {applyAllMsg.text}
+                  </p>
+                )}
               </div>
 
               <div>
