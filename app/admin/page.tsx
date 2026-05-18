@@ -24,6 +24,62 @@ function toStorageSlug(text: string): string {
     .replace(/[^a-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
+// ─── XHR upload wrapper ───────────────────────────────────────────────────────
+// Wraps XMLHttpRequest in a Promise so the outer async/await flow is unchanged.
+// Resolves on any completed response (caller checks .ok / .status).
+// Rejects with Error('Failed to fetch') on network error — intentionally mirrors
+// the fetch() error message so the existing tunnel-retry path triggers correctly.
+
+interface XHRResponse {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+  json(): Promise<unknown>;
+}
+
+function xhrUpload(
+  url: string,
+  formData: FormData,
+  apiKey: string,
+  onProgress: (pct: number) => void,
+): Promise<XHRResponse> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('x-api-key', apiKey);
+
+    // Track upload bytes as they leave the browser
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+
+    // Any completed HTTP response (including 4xx/5xx) — caller inspects .ok
+    xhr.onload = () => {
+      const responseText = xhr.responseText;
+      resolve({
+        ok:     xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        text:   () => Promise.resolve(responseText),
+        json:   () => {
+          try   { return Promise.resolve(JSON.parse(responseText) as unknown); }
+          catch { return Promise.reject(new Error('Invalid JSON response'));    }
+        },
+      });
+    };
+
+    // Network-level failure (no response) — same message as fetch() so the
+    // 'Failed to fetch' tunnel-retry check in handleUpload still fires
+    xhr.onerror = () => reject(new Error('Failed to fetch'));
+
+    // Timeout (we don't set xhr.timeout, but guard it anyway)
+    xhr.ontimeout = () => reject(new Error('Upload timed out'));
+
+    xhr.send(formData);
+  });
+}
+
 // ─── Document row type (returned by /api/documents) ──────────────────────────
 
 type DocumentRow = {
@@ -159,7 +215,6 @@ function SubjectCombobox({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setQuery(v);
-    // Only treat it as a confirmed value when it exactly matches a subject
     onChange(subjects.includes(v) ? v : v);
     setOpen(true);
   };
@@ -284,6 +339,9 @@ export default function AdminPage() {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [summary, setSummary] = useState<{ success: number; failed: number } | null>(null);
+
+  // Per-file upload progress: keyed by FileEntry.id, value 0–100
+  const [uploadProgress, setUploadProgress] = useState<Record<number, number>>({});
 
   // Documents list state
   const [documents, setDocuments]     = useState<DocumentRow[]>([]);
@@ -462,11 +520,15 @@ export default function AdminPage() {
 
     setIsUploading(true);
     setSummary(null);
+    setUploadProgress({});    // clear any leftover progress from a previous run
     let successCount = 0;
     let failCount = 0;
 
     for (const entry of entries) {
-      patchEntry(entry.id, { uploadStatus: 'uploading' });
+      patchEntry(entry.id, { uploadStatus: 'uploading', uploadMessage: undefined });
+      // Initialise progress to 0 so the bar appears immediately
+      setUploadProgress((prev) => ({ ...prev, [entry.id]: 0 }));
+
       const { fid, sid, sub, ft } = resolveParams(entry);
 
       try {
@@ -478,24 +540,31 @@ export default function AdminPage() {
         formData.append('subject', toStorageSlug(sub));
         formData.append('file', entry.file);
 
-        // ── Upload with auto-retry when the Cloudflare tunnel URL rotates ──
-        const doFetch = (url: string) =>
-          fetch(url, { method: 'POST', headers: { 'x-api-key': HETZNER_API_KEY }, body: formData });
+        // Helper: XHR upload with live progress, returns a fetch-compatible response object
+        const doXhr = (url: string) =>
+          xhrUpload(url, formData, HETZNER_API_KEY, (pct) => {
+            setUploadProgress((prev) => ({ ...prev, [entry.id]: pct }));
+          });
 
-        let uploadRes: Response;
+        // ── Upload with auto-retry when the Cloudflare tunnel URL rotates ──
+        // xhr.onerror rejects with Error('Failed to fetch') — same as fetch(),
+        // so this retry branch fires identically to before.
+        let uploadRes: XHRResponse;
         try {
-          uploadRes = await doFetch(tunnelUrlRef.current);
+          uploadRes = await doXhr(tunnelUrlRef.current);
         } catch (fetchErr) {
           const fetchMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
           if (fetchMsg === 'Failed to fetch') {
             // Cloudflare tunnel likely rotated — fetch the new URL and retry once
             patchEntry(entry.id, { uploadStatus: 'uploading', uploadMessage: 'Tunnel URL обновен, опитвам отново...' });
+            // Reset progress for retry
+            setUploadProgress((prev) => ({ ...prev, [entry.id]: 0 }));
             try {
               const txt = await fetch('http://178.105.161.66/tunnel-url.txt').then((r) => r.text());
               const newBase = txt.trim();
               if (newBase) tunnelUrlRef.current = newBase + '/upload';
             } catch { /* keep existing URL and retry anyway */ }
-            uploadRes = await doFetch(tunnelUrlRef.current);
+            uploadRes = await doXhr(tunnelUrlRef.current);
           } else {
             throw fetchErr;
           }
@@ -702,68 +771,87 @@ export default function AdminPage() {
               )}
 
               <div className="max-h-80 overflow-y-auto flex flex-col gap-1.5 rounded-lg border border-gray-200 p-2 bg-gray-50">
-                {entries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className="flex items-start gap-2 text-xs text-gray-700 bg-white rounded-lg px-3 py-2.5 border border-gray-100"
-                  >
-                    <span className="flex-shrink-0 mt-0.5 text-sm">
-                      {UPLOAD_ICON[entry.uploadStatus]}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{entry.file.name}</p>
-                      <p className="text-gray-400">{formatSize(entry.file.size)}</p>
+                {entries.map((entry) => {
+                  const pct = uploadProgress[entry.id] ?? 0;
+                  const showBar = entry.uploadStatus === 'uploading';
+                  return (
+                    <div
+                      key={entry.id}
+                      className="flex items-start gap-2 text-xs text-gray-700 bg-white rounded-lg px-3 py-2.5 border border-gray-100"
+                    >
+                      <span className="flex-shrink-0 mt-0.5 text-sm">
+                        {UPLOAD_ICON[entry.uploadStatus]}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{entry.file.name}</p>
+                        <p className="text-gray-400">{formatSize(entry.file.size)}</p>
 
-                      {/* Large-file warning */}
-                      {entry.file.size > 100 * 1024 * 1024 &&
-                        (entry.uploadStatus === 'idle' || entry.uploadStatus === 'uploading') && (
-                          <p className="text-yellow-600 mt-0.5">
-                            ⚠️ Файлът е по-голям от 100MB. Cloudflare tunnel може да го откаже.
-                            Препоръчваме компресиране с{' '}
-                            <a
-                              href="https://www.ilovepdf.com/compress_pdf"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="underline hover:text-yellow-700"
-                            >
-                              ilovepdf.com
-                            </a>
-                          </p>
+                        {/* ── Per-file progress bar (visible only while uploading) ── */}
+                        {showBar && (
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <div className="flex-1 bg-gray-200 rounded-full h-1 overflow-hidden">
+                              <div
+                                className="bg-blue-500 h-1 rounded-full transition-all duration-150"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="text-gray-500 tabular-nums w-7 text-right">
+                              {pct}%
+                            </span>
+                          </div>
                         )}
 
-                      {/* Auto-classification result */}
-                      {autoMode && (
-                        <div className="mt-1">
-                          {entry.classifyStatus === 'loading' && (
-                            <span className="text-xs text-gray-400 animate-pulse">🤖 Класифициране…</span>
+                        {/* Large-file warning */}
+                        {entry.file.size > 100 * 1024 * 1024 &&
+                          (entry.uploadStatus === 'idle' || entry.uploadStatus === 'uploading') && (
+                            <p className="text-yellow-600 mt-0.5">
+                              ⚠️ Файлът е по-голям от 100MB. Cloudflare tunnel може да го откаже.
+                              Препоръчваме компресиране с{' '}
+                              <a
+                                href="https://www.ilovepdf.com/compress_pdf"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline hover:text-yellow-700"
+                              >
+                                ilovepdf.com
+                              </a>
+                            </p>
                           )}
-                          {entry.classifyStatus === 'done' && entry.classifyResult && (
-                            <>
-                              <ConfidenceBadge result={entry.classifyResult} />
-                              {entry.classifyResult.confidence < 0.7 && (
-                                <ManualOverride entry={entry} onChange={patchEntry} />
-                              )}
-                            </>
-                          )}
-                          {entry.classifyStatus === 'error' && (
-                            <>
-                              <span className="text-xs text-red-500">Неуспешна класификация</span>
-                              <ManualOverride entry={entry} onChange={patchEntry} />
-                            </>
-                          )}
-                        </div>
-                      )}
 
-                      {/* Upload result messages */}
-                      {entry.uploadStatus === 'success' && entry.uploadMessage && (
-                        <p className="text-green-600 mt-0.5">{entry.uploadMessage}</p>
-                      )}
-                      {entry.uploadStatus === 'error' && entry.uploadMessage && (
-                        <p className="text-red-600 mt-0.5 break-words">{entry.uploadMessage}</p>
-                      )}
+                        {/* Auto-classification result */}
+                        {autoMode && (
+                          <div className="mt-1">
+                            {entry.classifyStatus === 'loading' && (
+                              <span className="text-xs text-gray-400 animate-pulse">🤖 Класифициране…</span>
+                            )}
+                            {entry.classifyStatus === 'done' && entry.classifyResult && (
+                              <>
+                                <ConfidenceBadge result={entry.classifyResult} />
+                                {entry.classifyResult.confidence < 0.7 && (
+                                  <ManualOverride entry={entry} onChange={patchEntry} />
+                                )}
+                              </>
+                            )}
+                            {entry.classifyStatus === 'error' && (
+                              <>
+                                <span className="text-xs text-red-500">Неуспешна класификация</span>
+                                <ManualOverride entry={entry} onChange={patchEntry} />
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Upload result messages */}
+                        {entry.uploadStatus === 'success' && entry.uploadMessage && (
+                          <p className="text-green-600 mt-0.5">{entry.uploadMessage}</p>
+                        )}
+                        {entry.uploadStatus === 'error' && entry.uploadMessage && (
+                          <p className="text-red-600 mt-0.5 break-words">{entry.uploadMessage}</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
