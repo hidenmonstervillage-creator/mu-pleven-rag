@@ -4,10 +4,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { FACULTIES } from '@/lib/faculties';
 import { Faculty, Specialty } from '@/lib/types';
 
-const HETZNER_UPLOAD_URL =
-  process.env.NEXT_PUBLIC_HETZNER_UPLOAD_URL ?? 'http://178.105.161.66/upload';
-const HETZNER_API_KEY =
-  process.env.NEXT_PUBLIC_HETZNER_API_KEY ?? 'mup-upload-secret-2024';
+// Upload goes through the Next.js proxy so the API key stays server-side
+// and there are no mixed-content (HTTPS→HTTP) browser blocks.
+const UPLOAD_PROXY_URL = '/api/upload-proxy';
 
 // Transliterate Cyrillic → ASCII slug for Hetzner path segments
 function toStorageSlug(text: string): string {
@@ -313,9 +312,8 @@ export default function AdminPage() {
         formData.append('subject', toStorageSlug(sub));
         formData.append('file', entry.file);
 
-        const uploadRes = await fetch(HETZNER_UPLOAD_URL, {
+        const uploadRes = await fetch(UPLOAD_PROXY_URL, {
           method: 'POST',
-          headers: { 'x-api-key': HETZNER_API_KEY },
           body: formData,
         });
         if (!uploadRes.ok) {
