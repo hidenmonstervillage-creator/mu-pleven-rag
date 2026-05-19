@@ -38,19 +38,47 @@ export async function POST(
     const filename   = doc.filename   as string;
     const storageUrl = doc.storage_url as string;
 
-    // ── Step 2: delete existing chunks ───────────────────────────────────────
-    console.log(`[reingest] ${docId} — STEP 2: deleting existing chunks`);
-    const { error: deleteErr } = await supabase
-      .from('chunks')
-      .delete()
-      .eq('document_id', docId);
+    // ── Step 2: delete existing chunks (batched) ─────────────────────────────
+    //
+    // A single DELETE … WHERE document_id = $1 scans the full 70k-row chunks
+    // table (no index on the FK column) AND updates the HNSW pgvector index
+    // for every matched row. On Supabase free tier the statement_timeout (~8 s)
+    // kills the query before it finishes — even when there are 0 rows to delete.
+    //
+    // Fix: read chunk IDs in pages of 200 (LIMIT keeps each SELECT fast) then
+    // delete each page by primary key (PK lookup = O(log n), no full scan).
+    console.log(`[reingest] ${docId} — STEP 2: deleting existing chunks (batched)`);
+    let deletedTotal = 0;
+    for (;;) {
+      const { data: idRows, error: fetchErr } = await supabase
+        .from('chunks')
+        .select('id')
+        .eq('document_id', docId)
+        .limit(200);
 
-    if (deleteErr) {
-      return NextResponse.json(
-        { error: `Failed to delete chunks: ${deleteErr.message}` },
-        { status: 500 },
-      );
+      if (fetchErr) {
+        return NextResponse.json(
+          { error: `Failed to fetch chunk IDs for deletion: ${fetchErr.message}` },
+          { status: 500 },
+        );
+      }
+      if (!idRows || idRows.length === 0) break; // nothing left
+
+      const { error: delErr } = await supabase
+        .from('chunks')
+        .delete()
+        .in('id', idRows.map((r) => r.id as string));
+
+      if (delErr) {
+        return NextResponse.json(
+          { error: `Failed to delete chunk batch: ${delErr.message}` },
+          { status: 500 },
+        );
+      }
+      deletedTotal += idRows.length;
+      console.log(`[reingest] ${docId} — deleted ${deletedTotal} chunks so far`);
     }
+    console.log(`[reingest] ${docId} — STEP 2 done: ${deletedTotal} chunks deleted`);
 
     // ── Step 3: download file from Hetzner ───────────────────────────────────
     console.log(`[reingest] ${docId} — STEP 3: downloading ${storageUrl}`);
