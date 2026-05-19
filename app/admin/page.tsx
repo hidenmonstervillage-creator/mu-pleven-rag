@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { Fragment, useState, useRef, useEffect, useCallback } from 'react';
 import { FACULTIES } from '@/lib/faculties';
 import { Faculty, Specialty } from '@/lib/types';
 
@@ -118,6 +118,8 @@ type FileEntry = {
   manualFileType: 'textbook' | 'lecture';
 };
 
+type SortKey = 'date_desc' | 'date_asc' | 'chunks_asc' | 'chunks_desc';
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatSize(bytes: number): string {
@@ -128,6 +130,13 @@ function formatSize(bytes: number): string {
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+
+// Chunk count health colour: red < 20, amber 20–99, green ≥ 100
+function chunkClass(count: number): string {
+  if (count < 20)  return 'text-red-600 font-semibold';
+  if (count < 100) return 'text-amber-600 font-semibold';
+  return 'text-green-600 font-semibold';
 }
 
 // Flat subject → { faculty_id, specialty_id } lookup
@@ -351,8 +360,23 @@ export default function AdminPage() {
   const [documents, setDocuments]     = useState<DocumentRow[]>([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError]     = useState<string | null>(null);
-  const [filterText, setFilterText]   = useState('');
   const [deletingId, setDeletingId]   = useState<string | null>(null);
+
+  // Documents filter / sort state
+  const [filterFacultyId,   setFilterFacultyId]   = useState('');
+  const [filterSpecialtyId, setFilterSpecialtyId] = useState('');
+  const [filterSubject,     setFilterSubject]     = useState('');
+  const [searchText,        setSearchText]        = useState('');
+  const [sortKey,           setSortKey]           = useState<SortKey>('date_desc');
+
+  // Inline reassign state
+  const [reassignId,          setReassignId]          = useState<string | null>(null);
+  const [reassignFacultyId,   setReassignFacultyId]   = useState('');
+  const [reassignSpecialtyId, setReassignSpecialtyId] = useState('');
+  const [reassignSubject,     setReassignSubject]     = useState('');
+  const [reassignSaving,      setReassignSaving]      = useState(false);
+  const [reassignMsg,         setReassignMsg]         = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const reassignTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Mode toggles
   const [autoMode, setAutoMode] = useState(false);
@@ -403,10 +427,102 @@ export default function AdminPage() {
     }
   }, []);
 
+  // ── Reassign callbacks ────────────────────────────────────────────────────
+
+  const openReassign = useCallback((doc: DocumentRow) => {
+    if (reassignTimerRef.current) clearTimeout(reassignTimerRef.current);
+    setReassignId(doc.id);
+    setReassignFacultyId(doc.faculty_id);
+    setReassignSpecialtyId(doc.specialty_id);
+    setReassignSubject(doc.subject);
+    setReassignMsg(null);
+  }, []);
+
+  const closeReassign = useCallback(() => {
+    if (reassignTimerRef.current) clearTimeout(reassignTimerRef.current);
+    setReassignId(null);
+    setReassignMsg(null);
+  }, []);
+
+  const handleReassignSave = useCallback(async () => {
+    if (!reassignId || !reassignFacultyId || !reassignSpecialtyId || !reassignSubject.trim()) return;
+    setReassignSaving(true);
+    setReassignMsg(null);
+    try {
+      const res = await fetch(`/api/documents/${reassignId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          faculty_id:   reassignFacultyId,
+          specialty_id: reassignSpecialtyId,
+          subject:      reassignSubject.trim(),
+        }),
+      });
+      const body = await res.json() as { success?: boolean; error?: string; document?: DocumentRow };
+      if (!res.ok || !body.success) throw new Error(body.error ?? `HTTP ${res.status}`);
+
+      // Patch local state so the table updates immediately without a full refetch
+      if (body.document) {
+        const updated = body.document;
+        setDocuments((prev) =>
+          prev.map((d) => (d.id === reassignId ? { ...d, ...updated } : d))
+        );
+      }
+
+      setReassignMsg({ type: 'ok', text: 'Запазено успешно' });
+      reassignTimerRef.current = setTimeout(() => {
+        setReassignId(null);
+        setReassignMsg(null);
+      }, 2000);
+    } catch (err) {
+      setReassignMsg({ type: 'err', text: err instanceof Error ? err.message : String(err) });
+      reassignTimerRef.current = setTimeout(() => setReassignMsg(null), 2000);
+    } finally {
+      setReassignSaving(false);
+    }
+  }, [reassignId, reassignFacultyId, reassignSpecialtyId, reassignSubject]);
+
+  // ── Derived values ────────────────────────────────────────────────────────
+
   const selectedFaculty: Faculty | undefined = FACULTIES.find((f) => f.id === facultyId);
   const selectedSpecialty: Specialty | undefined = selectedFaculty?.specialties.find(
     (s) => s.id === specialtyId
   );
+
+  // Reassign form cascading
+  const reassignFaculty = FACULTIES.find((f) => f.id === reassignFacultyId);
+  const reassignSpecialty = reassignFaculty?.specialties.find((s) => s.id === reassignSpecialtyId);
+
+  // Filter bar cascading options
+  const filterFacultyObj  = FACULTIES.find((f) => f.id === filterFacultyId);
+  const filterSpecialties = filterFacultyObj?.specialties ?? [];
+  const filterSubjectOptions =
+    filterSpecialties.find((s) => s.id === filterSpecialtyId)?.subjects ?? [];
+
+  // Filtered + sorted documents
+  const filteredDocs = (() => {
+    let result = [...documents];
+    if (filterFacultyId)   result = result.filter((d) => d.faculty_id    === filterFacultyId);
+    if (filterSpecialtyId) result = result.filter((d) => d.specialty_id  === filterSpecialtyId);
+    if (filterSubject)     result = result.filter((d) => d.subject        === filterSubject);
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase();
+      result = result.filter(
+        (d) =>
+          d.clean_title.toLowerCase().includes(q) ||
+          d.filename.toLowerCase().includes(q)
+      );
+    }
+    result.sort((a, b) => {
+      switch (sortKey) {
+        case 'date_desc':   return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        case 'date_asc':    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case 'chunks_desc': return b.chunk_count - a.chunk_count;
+        case 'chunks_asc':  return a.chunk_count - b.chunk_count;
+      }
+    });
+    return result;
+  })();
 
   const applyFolderMode = useCallback((enabled: boolean) => {
     const el = fileRef.current;
@@ -711,6 +827,10 @@ export default function AdminPage() {
 
   const selectClass =
     'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white';
+
+  // Check whether any filter/search is active (for the "Показани N от M" label)
+  const isFiltered =
+    !!filterFacultyId || !!filterSpecialtyId || !!filterSubject || !!searchText.trim();
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12 px-4">
@@ -1069,15 +1189,73 @@ export default function AdminPage() {
           </button>
         </div>
 
-        {/* Filter bar */}
-        <div className="mb-4">
-          <input
-            type="text"
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            placeholder="Филтрирайте по заглавие, факултет, специалност или предмет..."
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white"
-          />
+        {/* ── Filter bar ── */}
+        <div className="mb-4 flex flex-col gap-2">
+          {/* Row 1: cascading faculty → specialty → subject */}
+          <div className="flex gap-2 flex-wrap">
+            <select
+              value={filterFacultyId}
+              onChange={(e) => {
+                setFilterFacultyId(e.target.value);
+                setFilterSpecialtyId('');
+                setFilterSubject('');
+              }}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white"
+            >
+              <option value="">Всички факултети</option>
+              {FACULTIES.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={filterSpecialtyId}
+              onChange={(e) => {
+                setFilterSpecialtyId(e.target.value);
+                setFilterSubject('');
+              }}
+              disabled={!filterFacultyId}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white disabled:opacity-50"
+            >
+              <option value="">Всички специалности</option>
+              {filterSpecialties.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={filterSubject}
+              onChange={(e) => setFilterSubject(e.target.value)}
+              disabled={!filterSpecialtyId}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white disabled:opacity-50"
+            >
+              <option value="">Всички предмети</option>
+              {filterSubjectOptions.map((sub) => (
+                <option key={sub} value={sub}>{sub}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Row 2: filename search + sort */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Търсене по заглавие или файл..."
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white"
+            />
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white"
+            >
+              <option value="date_desc">Дата ↓</option>
+              <option value="date_asc">Дата ↑</option>
+              <option value="chunks_desc">Чанки ↓</option>
+              <option value="chunks_asc">Чанки ↑</option>
+            </select>
+          </div>
         </div>
 
         {docsLoading && (
@@ -1098,24 +1276,20 @@ export default function AdminPage() {
           </div>
         )}
 
-        {!docsLoading && !docsError && documents.length > 0 && (() => {
-          const q = filterText.trim().toLowerCase();
-          const filtered = q
-            ? documents.filter((d) =>
-                d.clean_title.toLowerCase().includes(q) ||
-                (FACULTY_NAME.get(d.faculty_id) ?? d.faculty_id).toLowerCase().includes(q) ||
-                (SPECIALTY_NAME.get(d.specialty_id) ?? d.specialty_id).toLowerCase().includes(q) ||
-                d.subject.toLowerCase().includes(q)
-              )
-            : documents;
+        {!docsLoading && !docsError && documents.length > 0 && (
+          <>
+            {/* Shown / total counter */}
+            <p className="text-xs text-gray-400 mb-2">
+              {isFiltered
+                ? `Показани ${filteredDocs.length} от ${documents.length} документа`
+                : `Показани ${filteredDocs.length} документа`}
+            </p>
 
-          return (
-            <>
-              {q && (
-                <p className="text-xs text-gray-400 mb-2">
-                  {filtered.length} резултата от {documents.length}
-                </p>
-              )}
+            {filteredDocs.length === 0 ? (
+              <div className="text-center py-12 text-gray-400 text-sm">
+                Няма документи, отговарящи на филтрите.
+              </div>
+            ) : (
               <div className="overflow-x-auto rounded-lg border border-gray-200">
                 <table className="w-full text-sm text-left">
                   <thead className="bg-gray-50 border-b border-gray-200">
@@ -1128,58 +1302,179 @@ export default function AdminPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {filtered.map((doc) => (
-                      <tr key={doc.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-3 py-2.5 max-w-[220px]">
-                          <p className="font-medium text-gray-800 truncate" title={doc.clean_title}>
-                            {doc.clean_title}
-                          </p>
-                          <p className="text-xs text-gray-400 truncate" title={doc.filename}>
-                            {doc.filename}
-                          </p>
-                        </td>
-                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap text-xs">
-                          {FACULTY_NAME.get(doc.faculty_id) ?? doc.faculty_id}
-                        </td>
-                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap text-xs">
-                          {SPECIALTY_NAME.get(doc.specialty_id) ?? doc.specialty_id}
-                        </td>
-                        <td className="px-3 py-2.5 text-gray-600 text-xs max-w-[140px]">
-                          <span className="truncate block" title={doc.subject}>{doc.subject}</span>
-                        </td>
-                        <td className="px-3 py-2.5 whitespace-nowrap text-xs">
-                          {doc.file_type === 'textbook' ? '📚 Учебник' : '🎓 Лекция'}
-                        </td>
-                        <td className="px-3 py-2.5 text-center text-xs text-gray-600">
-                          {doc.chunk_count}
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">
-                          {formatDate(doc.created_at)}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <button
-                            onClick={() => handleDelete(doc)}
-                            disabled={deletingId === doc.id}
-                            title="Изтрий"
-                            className="text-red-400 hover:text-red-600 disabled:opacity-40 transition-colors p-1 rounded hover:bg-red-50"
-                          >
-                            {deletingId === doc.id ? (
-                              <span className="animate-spin inline-block text-base">⏳</span>
-                            ) : (
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                              </svg>
-                            )}
-                          </button>
-                        </td>
-                      </tr>
+                    {filteredDocs.map((doc) => (
+                      <Fragment key={doc.id}>
+                        {/* ── Main document row ── */}
+                        <tr className={`hover:bg-gray-50 transition-colors ${reassignId === doc.id ? 'bg-red-50' : ''}`}>
+                          <td className="px-3 py-2.5 max-w-[220px]">
+                            <p className="font-medium text-gray-800 truncate" title={doc.clean_title}>
+                              {doc.clean_title}
+                            </p>
+                            <p className="text-xs text-gray-400 truncate" title={doc.filename}>
+                              {doc.filename}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap text-xs">
+                            {FACULTY_NAME.get(doc.faculty_id) ?? doc.faculty_id}
+                          </td>
+                          <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap text-xs">
+                            {SPECIALTY_NAME.get(doc.specialty_id) ?? doc.specialty_id}
+                          </td>
+                          <td className="px-3 py-2.5 text-gray-600 text-xs max-w-[140px]">
+                            <span className="truncate block" title={doc.subject}>{doc.subject}</span>
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                            {doc.file_type === 'textbook' ? '📚 Учебник' : '🎓 Лекция'}
+                          </td>
+                          <td className={`px-3 py-2.5 text-center text-xs ${chunkClass(doc.chunk_count)}`}>
+                            {doc.chunk_count}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">
+                            {formatDate(doc.created_at)}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-1">
+                              {/* Reassign toggle button */}
+                              <button
+                                onClick={() =>
+                                  reassignId === doc.id ? closeReassign() : openReassign(doc)
+                                }
+                                title={
+                                  reassignId === doc.id
+                                    ? 'Затвори'
+                                    : 'Премести към друг предмет'
+                                }
+                                className={`text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap ${
+                                  reassignId === doc.id
+                                    ? 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200'
+                                    : 'text-[#7B1C1C] border-[#7B1C1C] hover:bg-red-50'
+                                }`}
+                              >
+                                {reassignId === doc.id ? '✕' : 'Премести'}
+                              </button>
+
+                              {/* Delete button */}
+                              <button
+                                onClick={() => handleDelete(doc)}
+                                disabled={deletingId === doc.id}
+                                title="Изтрий"
+                                className="text-red-400 hover:text-red-600 disabled:opacity-40 transition-colors p-1 rounded hover:bg-red-50"
+                              >
+                                {deletingId === doc.id ? (
+                                  <span className="animate-spin inline-block text-base">⏳</span>
+                                ) : (
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                                  </svg>
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* ── Inline reassign expansion row ── */}
+                        {reassignId === doc.id && (
+                          <tr>
+                            <td colSpan={8} className="px-4 py-3 bg-red-50 border-t border-red-100">
+                              <div className="flex flex-col gap-3">
+                                <p className="text-xs font-semibold text-[#7B1C1C]">
+                                  Преместване на документа
+                                </p>
+                                <div className="flex flex-wrap gap-3 items-end">
+                                  {/* Faculty */}
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Факултет</label>
+                                    <select
+                                      value={reassignFacultyId}
+                                      onChange={(e) => {
+                                        setReassignFacultyId(e.target.value);
+                                        setReassignSpecialtyId('');
+                                        setReassignSubject('');
+                                      }}
+                                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white"
+                                    >
+                                      <option value="">— Факултет —</option>
+                                      {FACULTIES.map((f) => (
+                                        <option key={f.id} value={f.id}>{f.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  {/* Specialty */}
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Специалност</label>
+                                    <select
+                                      value={reassignSpecialtyId}
+                                      onChange={(e) => {
+                                        setReassignSpecialtyId(e.target.value);
+                                        setReassignSubject('');
+                                      }}
+                                      disabled={!reassignFaculty}
+                                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] bg-white disabled:opacity-50"
+                                    >
+                                      <option value="">— Специалност —</option>
+                                      {reassignFaculty?.specialties.map((s) => (
+                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  {/* Subject combobox */}
+                                  <div className="min-w-[200px]">
+                                    <label className="block text-xs text-gray-500 mb-1">Предмет</label>
+                                    <SubjectCombobox
+                                      subjects={reassignSpecialty?.subjects ?? []}
+                                      value={reassignSubject}
+                                      onChange={setReassignSubject}
+                                      disabled={!reassignSpecialty}
+                                    />
+                                  </div>
+
+                                  {/* Action buttons */}
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={handleReassignSave}
+                                      disabled={
+                                        reassignSaving ||
+                                        !reassignFacultyId ||
+                                        !reassignSpecialtyId ||
+                                        !reassignSubject.trim()
+                                      }
+                                      className="px-4 py-1.5 bg-red-900 text-white text-sm rounded-lg font-semibold hover:bg-red-800 disabled:opacity-50 transition-colors"
+                                    >
+                                      {reassignSaving ? '…' : 'Запази'}
+                                    </button>
+                                    <button
+                                      onClick={closeReassign}
+                                      className="px-4 py-1.5 text-gray-600 text-sm rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+                                    >
+                                      Откажи
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Inline save feedback */}
+                                {reassignMsg && (
+                                  <p
+                                    className={`text-xs ${
+                                      reassignMsg.type === 'ok' ? 'text-green-600' : 'text-red-600'
+                                    }`}
+                                  >
+                                    {reassignMsg.text}
+                                  </p>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </>
-          );
-        })()}
+            )}
+          </>
+        )}
       </div>
     </div>
   );
