@@ -14,6 +14,26 @@ interface PDFViewerProps {
   onClose: () => void;
 }
 
+// ── Hosts that serve PDFs over plain HTTP ─────────────────────────────────────
+// Browsers block HTTP resources loaded inside an HTTPS page (mixed-content).
+// For these hosts we route the fetch through our server-side proxy at
+// /api/pdf?url=… which re-serves the bytes over the site's own HTTPS.
+// Supabase-hosted files (ncpykcokbyzkgnmuvrgo.supabase.co) are already HTTPS
+// and are passed through unchanged.
+const HTTP_PROXY_HOSTS = new Set(['178.105.161.66']);
+
+function toProxiedUrl(storageUrl: string): string {
+  try {
+    const { hostname, protocol } = new URL(storageUrl);
+    if (protocol === 'http:' && HTTP_PROXY_HOSTS.has(hostname)) {
+      return `/api/pdf?url=${encodeURIComponent(storageUrl)}`;
+    }
+  } catch {
+    // Malformed URL — fall through and let the iframe fail visibly.
+  }
+  return storageUrl;
+}
+
 export default function PDFViewer({ payload, onClose }: PDFViewerProps) {
   const isOpen = payload !== null;
 
@@ -32,10 +52,13 @@ export default function PDFViewer({ payload, onClose }: PDFViewerProps) {
     return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
-  const iframeSrc = payload?.storageUrl
-    ? payload.pageNumber
-      ? `${payload.storageUrl}#page=${payload.pageNumber}`
-      : payload.storageUrl
+  // Route HTTP Hetzner URLs through the server-side proxy so that the HTTPS
+  // site can embed them without triggering a mixed-content block.
+  const baseUrl  = payload?.storageUrl ? toProxiedUrl(payload.storageUrl) : '';
+  const iframeSrc = baseUrl
+    ? payload?.pageNumber
+      ? `${baseUrl}#page=${payload.pageNumber}`
+      : baseUrl
     : '';
 
   return (
