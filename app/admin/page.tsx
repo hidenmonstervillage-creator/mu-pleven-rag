@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState, useRef, useEffect, useCallback } from 'react';
+import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { FACULTIES } from '@/lib/faculties';
 import { Faculty, Specialty } from '@/lib/types';
 
@@ -137,6 +137,11 @@ function chunkClass(count: number): string {
   if (count < 20)  return 'text-red-600 font-semibold';
   if (count < 100) return 'text-amber-600 font-semibold';
   return 'text-green-600 font-semibold';
+}
+
+// Normalize a filename into a cluster key: lowercase, trim, strip extension
+function normalizeFilename(filename: string): string {
+  return filename.trim().toLowerCase().replace(/\.[^.]+$/, '');
 }
 
 // Flat subject → { faculty_id, specialty_id } lookup
@@ -378,6 +383,16 @@ export default function AdminPage() {
   const [reassignMsg,         setReassignMsg]         = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const reassignTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Duplicate scanner state ───────────────────────────────────────────────
+  // dupOpen: whether the collapsible section is expanded
+  // dupKeptIds: clusterKey → doc ID the user wants to keep (smart default: highest chunk_count)
+  // dupDeletingCluster: clusterKey currently being bulk-deleted (shows spinner, disables button)
+  // dupClusterMsgs: per-cluster inline feedback (auto-dismissed after 3s)
+  const [dupOpen,             setDupOpen]             = useState(false);
+  const [dupKeptIds,          setDupKeptIds]          = useState<Record<string, string>>({});
+  const [dupDeletingCluster,  setDupDeletingCluster]  = useState<string | null>(null);
+  const [dupClusterMsgs,      setDupClusterMsgs]      = useState<Record<string, { type: 'ok' | 'err'; text: string }>>({});
+
   // Mode toggles
   const [autoMode, setAutoMode] = useState(false);
   const [folderMode, setFolderMode] = useState(false);
@@ -524,6 +539,104 @@ export default function AdminPage() {
     return result;
   })();
 
+  // ── Duplicate clusters ────────────────────────────────────────────────────
+  //
+  // Group documents by normalised filename (lowercase, trimmed, extension stripped).
+  // Any group with ≥ 2 docs is a duplicate cluster. Sorted descending by cluster size.
+  // useMemo keeps this stable across renders that don't touch `documents`.
+
+  const dupClusters = useMemo(() => {
+    const groups = new Map<string, DocumentRow[]>();
+    for (const doc of documents) {
+      const key = normalizeFilename(doc.filename);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(doc);
+    }
+    return Array.from(groups.entries())
+      .filter(([, docs]) => docs.length >= 2)
+      .map(([key, docs]) => ({ key, docs }))
+      .sort((a, b) => b.docs.length - a.docs.length);
+  }, [documents]);
+
+  // Initialise / update the "keep" selection whenever dupClusters changes:
+  //   - New clusters → smart default: keep the doc with the highest chunk count
+  //   - Stale clusters (deleted) → remove their entry
+  //   - Existing clusters with a valid selection → leave unchanged
+  useEffect(() => {
+    setDupKeptIds((prev) => {
+      const validKeys = new Set(dupClusters.map((c) => c.key));
+      const next: Record<string, string> = {};
+
+      // Preserve existing valid selections
+      for (const [k, v] of Object.entries(prev)) {
+        if (validKeys.has(k)) next[k] = v;
+      }
+
+      // Add smart default for newly discovered clusters
+      for (const { key, docs } of dupClusters) {
+        if (!(key in next)) {
+          const best = docs.reduce((a, b) => (a.chunk_count >= b.chunk_count ? a : b));
+          next[key] = best.id;
+        }
+      }
+
+      return next;
+    });
+  }, [dupClusters]);
+
+  // ── Duplicate bulk-delete handler ─────────────────────────────────────────
+  const handleDeleteDuplicates = useCallback(async (clusterKey: string) => {
+    const cluster = dupClusters.find((c) => c.key === clusterKey);
+    if (!cluster) return;
+
+    const keepId   = dupKeptIds[clusterKey];
+    if (!keepId) return;
+
+    const toDelete = cluster.docs.filter((d) => d.id !== keepId);
+    if (toDelete.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Сигурни ли сте? Това ще изтрие ${toDelete.length} документа от тази група.`
+    );
+    if (!confirmed) return;
+
+    setDupDeletingCluster(clusterKey);
+    let deletedCount = 0;
+    const errors: string[] = [];
+
+    for (const doc of toDelete) {
+      try {
+        const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({})) as { error?: string };
+          throw new Error(body.error ?? `HTTP ${res.status}`);
+        }
+        deletedCount++;
+        // Optimistically remove from local state after each successful delete
+        setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    setDupDeletingCluster(null);
+
+    // Show inline result message; auto-dismiss after 3s
+    const msg: { type: 'ok' | 'err'; text: string } =
+      errors.length === 0
+        ? { type: 'ok',  text: `Изтрити ${deletedCount} документа` }
+        : { type: 'err', text: `Изтрити ${deletedCount}, грешки: ${errors.join('; ')}` };
+
+    setDupClusterMsgs((prev) => ({ ...prev, [clusterKey]: msg }));
+    setTimeout(() => {
+      setDupClusterMsgs((prev) => {
+        const next = { ...prev };
+        delete next[clusterKey];
+        return next;
+      });
+    }, 3000);
+  }, [dupClusters, dupKeptIds]);
+
   const applyFolderMode = useCallback((enabled: boolean) => {
     const el = fileRef.current;
     if (!el) return;
@@ -661,19 +774,6 @@ export default function AdminPage() {
   }, [facultyId, specialtyId, subject, entries.length]);
 
   // ── Upload handler ─────────────────────────────────────────────────────────
-  //
-  // Duplicate detection strategy: CLIENT-SIDE filtering of the `documents`
-  // state snapshot (already loaded on mount, refreshed after each batch).
-  // This avoids extra API calls and query-param changes to /api/documents.
-  // The snapshot is taken once when handleUpload is called; documents uploaded
-  // within the current batch are NOT in this snapshot, preventing false
-  // positives between sibling files in the same run.
-  //
-  // All files run in parallel via Promise.all. A file that finds a duplicate
-  // parks in 'duplicate' status, awaiting a Promise<boolean> whose resolver is
-  // stored in confirmCallbacksRef. The "Да"/"Не" buttons in the UI call that
-  // resolver, unblocking only that file's async chain while all other files
-  // continue unaffected.
 
   const handleUpload = async () => {
     if (!canUpload() || isUploading) return;
@@ -832,10 +932,29 @@ export default function AdminPage() {
   const isFiltered =
     !!filterFacultyId || !!filterSpecialtyId || !!filterSubject || !!searchText.trim();
 
+  // Duplicate scanner summary counters
+  const dupTotalExtras = dupClusters.reduce((s, c) => s + c.docs.length - 1, 0);
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12 px-4">
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-        <h1 className="text-2xl font-bold text-[#7B1C1C] mb-1">Качване на материали</h1>
+        <div className="flex items-start justify-between mb-1">
+          <h1 className="text-2xl font-bold text-[#7B1C1C]">Качване на материали</h1>
+          <div className="flex items-center gap-4 mt-1 ml-4">
+            <a
+              href="/admin/slides"
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#7B1C1C] transition-colors whitespace-nowrap"
+            >
+              🔬 Препарати
+            </a>
+            <a
+              href="/admin/stats"
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#7B1C1C] transition-colors whitespace-nowrap"
+            >
+              📊 Статистика
+            </a>
+          </div>
+        </div>
         <p className="text-sm text-gray-500 mb-6">Административен панел — МУ-Плевен AI Library</p>
 
         {/* ── Auto mode toggle ── */}
@@ -1474,6 +1593,212 @@ export default function AdminPage() {
               </div>
             )}
           </>
+        )}
+      </div>
+
+      {/* ══ Duplicate scanner section ══════════════════════════════════════════
+          Closed by default — the grouping runs only when the section is open,
+          driven by the dupClusters useMemo (which depends on documents).
+          Opening the section reveals the cluster cards immediately since the
+          documents array is already loaded above.
+      ════════════════════════════════════════════════════════════════════════ */}
+      <div className="w-full max-w-6xl mt-8 bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+        {/* ── Section header (always visible) ── */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-[#7B1C1C]">Дубликати в библиотеката</h2>
+            {!docsLoading && !docsError && !dupOpen && dupClusters.length > 0 && (
+              <p className="text-xs text-amber-600 mt-0.5 font-medium">
+                ⚠️ Открити {dupClusters.length} клъстера с общо {dupTotalExtras} дубликата
+              </p>
+            )}
+            {!docsLoading && !docsError && !dupOpen && dupClusters.length === 0 && (
+              <p className="text-xs text-gray-400 mt-0.5">
+                Изчислено на база качените материали
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => setDupOpen((v) => !v)}
+            disabled={docsLoading}
+            className={`text-sm px-4 py-2 rounded-lg border transition-colors disabled:opacity-40 ${
+              dupOpen
+                ? 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                : 'border-[#7B1C1C] text-[#7B1C1C] hover:bg-red-50'
+            }`}
+          >
+            {dupOpen ? 'Скрий' : 'Покажи дубликати'}
+          </button>
+        </div>
+
+        {/* ── Expanded content ── */}
+        {dupOpen && (
+          <div className="mt-5">
+            {docsLoading ? (
+              <div className="flex items-center justify-center py-10 text-gray-400 text-sm gap-2">
+                <span className="animate-spin text-lg">⏳</span> Зареждане…
+              </div>
+            ) : docsError ? (
+              <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                Грешка при зареждане: {docsError}
+              </div>
+            ) : dupClusters.length === 0 ? (
+              <div className="py-10 text-center text-green-600 font-semibold text-sm">
+                Няма дубликати в библиотеката ✓
+              </div>
+            ) : (
+              <>
+                {/* Counter */}
+                <p className="text-sm text-gray-600 mb-5">
+                  <span className="font-semibold">{dupClusters.length}</span> клъстера с общо{' '}
+                  <span className="font-semibold">{dupTotalExtras}</span> дубликата
+                </p>
+
+                {/* Cluster cards */}
+                <div className="flex flex-col gap-5">
+                  {dupClusters.map(({ key, docs }) => {
+                    const keepId        = dupKeptIds[key] ?? '';
+                    const isDeleting    = dupDeletingCluster === key;
+                    const isBusy        = !!dupDeletingCluster;
+                    const msg           = dupClusterMsgs[key];
+                    const toDeleteCount = docs.filter((d) => d.id !== keepId).length;
+
+                    return (
+                      <div
+                        key={key}
+                        className="rounded-xl border border-gray-200 overflow-hidden"
+                      >
+                        {/* Card header */}
+                        <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-2">
+                          <p className="font-semibold text-gray-700 text-sm truncate">
+                            📄 {key}
+                          </p>
+                          <span className="flex-shrink-0 text-xs text-gray-400 font-normal whitespace-nowrap">
+                            {docs.length} копия
+                          </span>
+                        </div>
+
+                        {/* Doc rows */}
+                        <div className="divide-y divide-gray-100">
+                          {docs.map((doc) => {
+                            const isKept = keepId === doc.id;
+                            return (
+                              <div
+                                key={doc.id}
+                                className={`px-4 py-3 flex items-start gap-3 transition-colors ${
+                                  isKept ? 'bg-green-50' : 'bg-white hover:bg-gray-50'
+                                }`}
+                              >
+                                {/* "Keep this" radio */}
+                                <label className="flex items-center gap-1.5 mt-0.5 cursor-pointer flex-shrink-0 select-none">
+                                  <input
+                                    type="radio"
+                                    name={`keep-${key}`}
+                                    value={doc.id}
+                                    checked={isKept}
+                                    onChange={() =>
+                                      setDupKeptIds((prev) => ({ ...prev, [key]: doc.id }))
+                                    }
+                                    disabled={isDeleting}
+                                    className="accent-[#7B1C1C]"
+                                  />
+                                  <span className="text-xs text-gray-600 whitespace-nowrap">
+                                    Запази този
+                                  </span>
+                                </label>
+
+                                {/* Document info */}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-800 truncate" title={doc.clean_title}>
+                                    {doc.clean_title}
+                                  </p>
+                                  <p className="text-xs text-gray-500 truncate mt-0.5">
+                                    {FACULTY_NAME.get(doc.faculty_id) ?? doc.faculty_id}
+                                    {' / '}
+                                    {SPECIALTY_NAME.get(doc.specialty_id) ?? doc.specialty_id}
+                                    {' / '}
+                                    {doc.subject}
+                                  </p>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    <span className={`text-xs ${chunkClass(doc.chunk_count)}`}>
+                                      {doc.chunk_count} чанка
+                                    </span>
+                                    <span className="text-xs text-gray-400">
+                                      {formatDate(doc.created_at)}
+                                    </span>
+                                    {isKept && (
+                                      <span className="text-xs text-green-600 font-medium">
+                                        ✓ запазен
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Individual delete ✕ */}
+                                <button
+                                  onClick={() => handleDelete(doc)}
+                                  disabled={deletingId === doc.id || isDeleting}
+                                  title="Изтрий"
+                                  className="flex-shrink-0 text-red-400 hover:text-red-600 disabled:opacity-40 transition-colors p-1 rounded hover:bg-red-50"
+                                >
+                                  {deletingId === doc.id ? (
+                                    <span className="animate-spin inline-block text-sm">⏳</span>
+                                  ) : (
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      className="h-4 w-4"
+                                      viewBox="0 0 20 20"
+                                      fill="currentColor"
+                                    >
+                                      <path
+                                        fillRule="evenodd"
+                                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                                        clipRule="evenodd"
+                                      />
+                                    </svg>
+                                  )}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Card footer — bulk delete action */}
+                        <div className="px-4 py-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between gap-4">
+                          <div className="min-h-[20px]">
+                            {msg && (
+                              <p
+                                className={`text-xs font-medium ${
+                                  msg.type === 'ok' ? 'text-green-600' : 'text-red-600'
+                                }`}
+                              >
+                                {msg.type === 'ok' ? '✓ ' : '✗ '}
+                                {msg.text}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleDeleteDuplicates(key)}
+                            disabled={!keepId || toDeleteCount === 0 || isDeleting || isBusy}
+                            className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-red-700 text-white text-sm rounded-lg font-semibold hover:bg-red-800 disabled:opacity-50 transition-colors"
+                          >
+                            {isDeleting ? (
+                              <>
+                                <span className="animate-spin inline-block">⏳</span>
+                                Изтриване…
+                              </>
+                            ) : (
+                              `Изтрий останалите (${toDeleteCount})`
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
     </div>
