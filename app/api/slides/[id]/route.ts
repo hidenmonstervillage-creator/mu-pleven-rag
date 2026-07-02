@@ -4,9 +4,11 @@ import { createServiceClient } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 
 // ── PATCH /api/slides/[id] ─────────────────────────────────────────────────────
-// Updates any subset of a slide's fields. Typically used to:
-//   • reassign to a different subject (same as /api/documents/[id] PATCH pattern)
-//   • fix organ / konspekt_number / stain after initial entry
+// Updates slide metadata fields and/or replaces subject mappings.
+//
+// Body (all fields optional):
+//   slide_name, organ, konspekt_number, stain, olyvia_folder   — slide fields
+//   subjects: Array<{faculty_id, specialty_id, subject}>        — replaces ALL mappings
 
 export async function PATCH(
   req: NextRequest,
@@ -14,13 +16,10 @@ export async function PATCH(
 ) {
   try {
     const body = await req.json() as Record<string, unknown>;
+    const supabase = createServiceClient();
 
-    // Build the update object from whatever fields were sent
-    const allowed = [
-      'slide_name', 'organ', 'konspekt_number', 'stain',
-      'faculty_id', 'specialty_id', 'subject', 'olyvia_folder',
-    ] as const;
-
+    // ── 1. Update slide fields ─────────────────────────────────────────────
+    const allowed = ['slide_name', 'organ', 'konspekt_number', 'stain', 'olyvia_folder'] as const;
     const updates: Record<string, string | null> = {};
     for (const key of allowed) {
       if (key in body) {
@@ -29,29 +28,57 @@ export async function PATCH(
       }
     }
 
-    // Extra validation: if reassigning subject, all three hierarchy fields must be present together
-    const hasSubjectField = 'subject' in updates || 'faculty_id' in updates || 'specialty_id' in updates;
-    if (hasSubjectField) {
-      const needsBoth = !updates.faculty_id || !updates.specialty_id || !updates.subject;
-      if (needsBoth) {
-        return NextResponse.json(
-          { error: 'When updating subject mapping, faculty_id, specialty_id and subject are all required' },
-          { status: 400 },
-        );
+    if (Object.keys(updates).length > 0) {
+      const { error } = await supabase
+        .from('slides')
+        .update(updates)
+        .eq('id', params.id);
+      if (error) throw new Error(error.message);
+    }
+
+    // ── 2. Replace subject mappings if provided ────────────────────────────
+    if ('subjects' in body) {
+      const subjects = body.subjects;
+      if (!Array.isArray(subjects) || subjects.length === 0) {
+        return NextResponse.json({ error: 'subjects must be a non-empty array' }, { status: 400 });
       }
+      for (const s of subjects as Array<Record<string, unknown>>) {
+        if (!s.faculty_id || !s.specialty_id || !s.subject) {
+          return NextResponse.json(
+            { error: 'Each subject mapping must have faculty_id, specialty_id, and subject' },
+            { status: 400 },
+          );
+        }
+      }
+
+      const { error: delErr } = await supabase
+        .from('slide_subjects')
+        .delete()
+        .eq('slide_id', params.id);
+      if (delErr) throw new Error(delErr.message);
+
+      const { error: insErr } = await supabase
+        .from('slide_subjects')
+        .insert(
+          (subjects as Array<{ faculty_id: string; specialty_id: string; subject: string }>)
+            .map(s => ({
+              slide_id:    params.id,
+              faculty_id:  s.faculty_id.trim(),
+              specialty_id: s.specialty_id.trim(),
+              subject:     s.subject.trim(),
+            })),
+        );
+      if (insErr) throw new Error(insErr.message);
     }
 
-    if (Object.keys(updates).length === 0) {
-      return NextResponse.json({ error: 'No updatable fields provided' }, { status: 400 });
-    }
-
-    const supabase = createServiceClient();
-
+    // ── 3. Return updated slide with subjects ──────────────────────────────
     const { data, error } = await supabase
       .from('slides')
-      .update(updates)
+      .select(`
+        id, record_id, slide_name, organ, konspekt_number, stain, olyvia_folder, created_at,
+        slide_subjects ( id, faculty_id, specialty_id, subject )
+      `)
       .eq('id', params.id)
-      .select()
       .single();
 
     if (error) throw new Error(error.message);
@@ -65,8 +92,7 @@ export async function PATCH(
 }
 
 // ── DELETE /api/slides/[id] ────────────────────────────────────────────────────
-// Removes the slide from our catalog. Does NOT touch OlyVia — the original
-// slide on the microscopy server is unaffected.
+// Removes the slide from the catalog. slide_subjects rows are deleted via CASCADE.
 
 export async function DELETE(
   _req: NextRequest,

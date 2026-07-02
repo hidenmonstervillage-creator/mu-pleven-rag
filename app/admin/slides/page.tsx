@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { FACULTIES } from '@/lib/faculties';
+import { SLIDES_FACULTIES as FACULTIES } from '@/lib/slides-faculties';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
