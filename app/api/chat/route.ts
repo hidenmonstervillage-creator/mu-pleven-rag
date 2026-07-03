@@ -42,9 +42,12 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Step 2a: filter out low-relevance chunks (similarity < 0.3)
+  // Step 2a: filter out low-relevance chunks (similarity < 0.2)
+  // Threshold lowered from 0.3 → 0.2: text-embedding-3-small yields lower cosine
+  // scores on Bulgarian text, so valid anatomy matches legitimately land ~0.25–0.28
+  // and were being wrongly filtered to empty at 0.3.
   const aboveThreshold = ((rawChunks ?? []) as SourceChunk[]).filter(
-    (c) => (c.similarity ?? 0) >= 0.3
+    (c) => (c.similarity ?? 0) >= 0.2
   );
 
   // Step 2b: deduplicate by document — keep max 2 highest-scoring chunks per document
