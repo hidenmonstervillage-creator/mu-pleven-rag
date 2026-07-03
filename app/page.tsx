@@ -7,6 +7,7 @@ import TopBar from '@/components/TopBar';
 import ChatArea from '@/components/ChatArea';
 import MessageInput from '@/components/MessageInput';
 import PDFViewer, { PDFViewerPayload } from '@/components/PDFViewer';
+import SlidePanel from '@/components/SlidePanel';
 import { ChatMessage, ConversationHistory, SourceChunk } from '@/lib/types';
 
 // Persist conversation to localStorage
@@ -210,6 +211,13 @@ export default function HomePage() {
       <PDFViewer
         payload={pdfViewerPayload}
         onClose={() => setPdfViewerPayload(null)}
+      />
+
+      {/* Student-facing microscope-slide catalog — auto-hides for subjects with no slides */}
+      <SlidePanel
+        facultyId={facultyId}
+        specialtyId={specialtyId}
+        subject={subject}
       />
     </div>
   );
