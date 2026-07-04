@@ -14,6 +14,7 @@ export interface SubjectSlide {
 interface SlideViewerProps {
   slide: SubjectSlide | null;
   onClose: () => void;
+  initialMode?: 'full' | 'min'; // how a newly-opened slide should appear
 }
 
 // "Latin / Български" — Latin first, Bulgarian after the slash; Latin only if null.
@@ -29,7 +30,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 // Full zoomable Olympus OlyVia viewer for one slide, via the /api/olyvia proxy —
 // the embed proven on /slide-test. Three states: full-screen, minimized floating
 // (draggable, iframe stays mounted so zoom/pan is preserved), and closed.
-export default function SlideViewer({ slide, onClose }: SlideViewerProps) {
+export default function SlideViewer({ slide, onClose, initialMode = 'full' }: SlideViewerProps) {
   const open = slide !== null;
   const [mode, setMode] = useState<'full' | 'min'>('full');
   const [pos, setPos]   = useState<{ x: number; y: number } | null>(null);
@@ -37,10 +38,20 @@ export default function SlideViewer({ slide, onClose }: SlideViewerProps) {
   const dragRef  = useRef<{ dx: number; dy: number } | null>(null);
   const boxRef   = useRef<HTMLDivElement | null>(null);
 
-  // Every newly-opened slide starts full-screen.
+  // A newly-opened slide appears in the requested mode (list → full, chat
+  // suggestion → minimized floating).
   useEffect(() => {
-    if (slide) setMode('full');
+    if (slide) setMode(initialMode);
   }, [slide?.record_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Place the floating window whenever we enter minimized mode without a saved
+  // position — covers both the ⛶/minimize path and opening directly minimized.
+  useEffect(() => {
+    if (open && mode === 'min' && !pos) {
+      const { w, vw } = effectiveSize();
+      setPos({ x: Math.max(8, vw - w - 24), y: 76 });
+    }
+  }, [open, mode, pos]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Esc closes (only meaningful in full-screen; harmless otherwise).
   useEffect(() => {
@@ -64,12 +75,8 @@ export default function SlideViewer({ slide, onClose }: SlideViewerProps) {
   }
 
   function minimize() {
-    // Default landing spot: top-right, clear of the bottom chat input. Remembered
-    // for the rest of the session (pos state persists while mounted).
-    if (!pos) {
-      const { w, vw } = effectiveSize();
-      setPos({ x: Math.max(8, vw - w - 24), y: 76 });
-    }
+    // The pos-placement effect handles the landing spot (top-right, clear of the
+    // chat input). Position persists for the rest of the session once set.
     setMode('min');
   }
 

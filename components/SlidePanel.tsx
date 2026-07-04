@@ -7,24 +7,85 @@ interface SlidePanelProps {
   facultyId: string;
   specialtyId: string;
   subject: string;
+  question?: string;       // latest user chat message (for auto-suggest)
+  questionNonce?: number;  // bumped on every send so re-asks re-trigger
+}
+
+// ── Question → slide matching (accent-tolerant, light Bulgarian stemming) ──────
+
+const STOP = new Set([
+  'и', 'на', 'за', 'от', 'с', 'в', 'до', 'по', 'при', 'към', 'или', 'ми', 'ме',
+  'разкажи', 'кажи', 'какво', 'какви', 'каква', 'как', 'the', 'of', 'in', 'et',
+  'and', 'a', 'an', 'tell', 'me', 'about', 'what', 'tissue', 'тъкан',
+]);
+
+function normText(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')  // strip combining diacritics
+    .replace(/[^a-z0-9Ѐ-ӿ]+/g, ' ')          // keep Latin, digits, Cyrillic
+    .trim();
+}
+
+// Strip common Bulgarian definite-article / plural / case endings.
+const BG_ENDINGS = ['овете', 'ищата', 'ията', 'ите', 'ята', 'ове', 'ът', 'ят', 'та', 'то', 'ето', 'ата', 'ия', 'а', 'о', 'е', 'и', 'ъ', 'я'];
+function stem(w: string): string {
+  for (const e of BG_ENDINGS) {
+    if (w.length > e.length + 2 && w.endsWith(e)) return w.slice(0, -e.length);
+  }
+  return w;
+}
+
+// Organ keywords are the CANONICAL base form — do NOT stem them (stemming e.g.
+// "аорта" → "аор" would break matching). Inflection is handled in tokenMatch,
+// where the (stemmed) query word starts-with the organ base.
+function keywords(str: string): string[] {
+  return normText(str).split(' ').filter((w) => w.length >= 3 && !STOP.has(w));
+}
+
+function tokenMatch(qw: string, k: string): boolean {
+  return qw === k || (k.length >= 4 && qw.startsWith(k)) || (qw.length >= 4 && k.startsWith(qw));
+}
+
+// A slide matches if a distinctive keyword (stem ≥6) of its organ or organ_bg is
+// present in the question; for organs made only of short words, require all of
+// them (keeps precision high — a missed suggestion is fine, a wrong one is not).
+function matchesQuestion(qWords: string[], slide: SubjectSlide): boolean {
+  const test = (str: string) => {
+    const kws = keywords(str);
+    if (kws.length === 0) return false;
+    const strong = kws.filter((k) => k.length >= 6);
+    if (strong.length > 0) return strong.some((k) => qWords.some((qw) => tokenMatch(qw, k)));
+    return kws.every((k) => qWords.some((qw) => tokenMatch(qw, k)));
+  };
+  return test(slide.organ_bg ?? '') || test(slide.organ ?? '');
 }
 
 // Student-facing "Микроскопски препарати" panel. Fully additive and self-managing:
 //   • Fetches the slides mapped to the currently-selected subject.
 //   • If the subject has NO slides, renders nothing (no trigger, no panel).
 //   • Trigger button → list drawer with search → click a slide → zoomable viewer.
-export default function SlidePanel({ facultyId, specialtyId, subject }: SlidePanelProps) {
+export default function SlidePanel({ facultyId, specialtyId, subject, question = '', questionNonce = 0 }: SlidePanelProps) {
   const [slides, setSlides]   = useState<SubjectSlide[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen]       = useState(false);
   const [query, setQuery]     = useState('');
   const [selected, setSelected] = useState<SubjectSlide | null>(null);
+  const [openMode, setOpenMode] = useState<'full' | 'min'>('full');
+  const [suggestions, setSuggestions] = useState<SubjectSlide[]>([]);
+
+  // Open a slide in the viewer: 'full' from the list, 'min' from a chat suggestion.
+  function openSlide(slide: SubjectSlide, mode: 'full' | 'min') {
+    setOpenMode(mode);
+    setSelected(slide);
+  }
 
   // Fetch whenever the subject selection changes. Reset panel state each time.
   useEffect(() => {
     setOpen(false);
     setSelected(null);
     setQuery('');
+    setSuggestions([]);
 
     if (!facultyId || !specialtyId || !subject) {
       setSlides([]);
@@ -58,6 +119,24 @@ export default function SlidePanel({ facultyId, specialtyId, subject }: SlidePan
       (s.slide_name ?? '').toLowerCase().includes(q),
     );
   }, [slides, query]);
+
+  // Auto-suggest: on each new chat question, match it against the ALREADY-LOADED
+  // slides (no re-fetch) for the current subject. Up to 3 distinct organs.
+  useEffect(() => {
+    if (!question.trim() || slides.length === 0) { setSuggestions([]); return; }
+    const qWords = normText(question).split(' ').filter(Boolean).map(stem);
+    const matches: SubjectSlide[] = [];
+    const seen = new Set<string>();
+    for (const s of slides) {
+      if (!matchesQuestion(qWords, s)) continue;
+      const label = s.organ_bg || s.organ || s.slide_name || '';
+      if (seen.has(label)) continue;
+      seen.add(label);
+      matches.push(s);
+      if (matches.length >= 3) break;
+    }
+    setSuggestions(matches);
+  }, [questionNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Nothing to show for subjects without slides (or before first load completes).
   if (slides.length === 0) return null;
@@ -156,7 +235,7 @@ export default function SlidePanel({ facultyId, specialtyId, subject }: SlidePan
               {filtered.map((s) => (
                 <button
                   key={s.record_id}
-                  onClick={() => setSelected(s)}
+                  onClick={() => openSlide(s, 'full')}
                   className="group flex items-center gap-3 text-left p-2.5 rounded-xl border border-gray-200 hover:border-[#7B1C1C] hover:bg-[#7B1C1C]/[0.03] transition-colors"
                 >
                   {/* Prominent konspekt number — students search by it */}
@@ -197,8 +276,38 @@ export default function SlidePanel({ facultyId, specialtyId, subject }: SlidePan
         </div>
       </div>
 
+      {/* Auto-suggest chip — subtle nudge above the chat input, opens the mini-viewer */}
+      {suggestions.length > 0 && (
+        <div className="fixed bottom-[88px] left-1/2 -translate-x-1/2 z-30 max-w-[92vw]">
+          <div className="flex items-start gap-2 bg-white border border-[#7B1C1C]/20 shadow-xl rounded-2xl pl-3.5 pr-2 py-2">
+            <div className="flex flex-col gap-1">
+              {suggestions.map((s) => (
+                <button
+                  key={s.record_id}
+                  onClick={() => { openSlide(s, 'min'); setSuggestions([]); }}
+                  className="group flex items-center gap-1.5 text-sm text-[#7B1C1C] hover:underline text-left"
+                >
+                  <span aria-hidden="true">🔬</span>
+                  <span>Разгледай препарата: <span className="font-semibold">{s.organ_bg || s.organ}</span></span>
+                  <span className="transition-transform group-hover:translate-x-0.5" aria-hidden="true">→</span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setSuggestions([])}
+              className="flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              aria-label="Скрий предложението"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Zoomable viewer (opens on top of the list) */}
-      <SlideViewer slide={selected} onClose={() => setSelected(null)} />
+      <SlideViewer slide={selected} onClose={() => setSelected(null)} initialMode={openMode} />
     </>
   );
 }

@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { FACULTIES } from '@/lib/faculties';
 import { Faculty, Specialty } from '@/lib/types';
+import SubjectCombobox from '@/components/SubjectCombobox';
 
 interface TopBarProps {
   facultyId: string;
@@ -92,20 +93,20 @@ export default function TopBar({
           ))}
         </select>
 
-        {/* Subject */}
-        <select
-          value={subject}
-          onChange={(e) => onSubjectChange(e.target.value)}
-          disabled={!selectedSpecialty || selectedSpecialty.subjects.length === 0}
-          className={selectClass}
-        >
-          <option value="">— Предмет —</option>
-          {selectedSpecialty?.subjects.map((sub) => (
-            <option key={sub} value={sub}>
-              {sub}
-            </option>
-          ))}
-        </select>
+        {/* Subject — searchable combobox (type to filter) */}
+        <div className="w-[220px]">
+          <SubjectCombobox
+            subjects={selectedSpecialty?.subjects ?? []}
+            value={subject}
+            disabled={!selectedSpecialty || selectedSpecialty.subjects.length === 0}
+            placeholder="— Предмет —"
+            onChange={(v) => {
+              // Only commit a real subject — ignore partial typing so the cascade
+              // (chat, slide panel, auto-suggest) never sees an invalid value.
+              if ((selectedSpecialty?.subjects ?? []).includes(v)) onSubjectChange(v);
+            }}
+          />
+        </div>
       </div>
     </header>
   );

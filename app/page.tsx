@@ -39,6 +39,8 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [pdfViewerPayload, setPdfViewerPayload] = useState<PDFViewerPayload | null>(null);
+  const [askedQuestion, setAskedQuestion] = useState('');
+  const [askNonce, setAskNonce] = useState(0);
 
   const handleOpenPdf = useCallback((payload: PDFViewerPayload) => {
     setPdfViewerPayload(payload);
@@ -80,6 +82,10 @@ export default function HomePage() {
     setInputValue('');
     setIsLoading(true);
     setStreamingContent('');
+
+    // Feed the question to the slide auto-suggest (re-triggers on every send).
+    setAskedQuestion(text);
+    setAskNonce((n) => n + 1);
 
     // Prepare conversation history (without sources) for the API
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
@@ -218,6 +224,8 @@ export default function HomePage() {
         facultyId={facultyId}
         specialtyId={specialtyId}
         subject={subject}
+        question={askedQuestion}
+        questionNonce={askNonce}
       />
     </div>
   );
