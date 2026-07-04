@@ -14,6 +14,7 @@ interface SubjectSlideRow {
   record_id: number;
   slide_name: string;
   organ: string | null;
+  organ_bg: string | null;
   konspekt_number: string | null;
   stain: string | null;
 }
@@ -52,15 +53,31 @@ export async function GET(req: NextRequest) {
     const ids = Array.from(new Set((links ?? []).map((l) => l.slide_id)));
     if (ids.length === 0) return NextResponse.json({ slides: [] });
 
-    // 2. Fetch the slide rows.
-    const { data: slides, error: slErr } = await supabase
-      .from('slides')
-      .select('record_id, slide_name, organ, konspekt_number, stain')
-      .in('id', ids);
-    if (slErr) throw new Error(slErr.message);
+    // 2. Fetch the slide rows. Include organ_bg, but fall back gracefully if the
+    //    0017 migration hasn't been applied yet — so the panel never breaks.
+    let slides: SubjectSlideRow[] | null = null;
+    {
+      const withBg = await supabase
+        .from('slides')
+        .select('record_id, slide_name, organ, organ_bg, konspekt_number, stain')
+        .in('id', ids);
+      if (withBg.error && /organ_bg/i.test(withBg.error.message)) {
+        // Column not yet added by migration 0017 — retry without it.
+        const noBg = await supabase
+          .from('slides')
+          .select('record_id, slide_name, organ, konspekt_number, stain')
+          .in('id', ids);
+        if (noBg.error) throw new Error(noBg.error.message);
+        slides = (noBg.data ?? []).map((s) => ({ ...s, organ_bg: null })) as SubjectSlideRow[];
+      } else if (withBg.error) {
+        throw new Error(withBg.error.message);
+      } else {
+        slides = (withBg.data ?? []) as SubjectSlideRow[];
+      }
+    }
 
     // 3. Natural sort: konspekt_number (numeric-aware) then organ.
-    const sorted = ((slides ?? []) as SubjectSlideRow[]).sort((a, b) => {
+    const sorted = (slides ?? []).sort((a, b) => {
       const [an, as] = konspektKey(a.konspekt_number);
       const [bn, bs] = konspektKey(b.konspekt_number);
       if (an !== bn) return an - bn;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import SlideViewer, { SubjectSlide } from './SlideViewer';
+import SlideViewer, { SubjectSlide, organLabel } from './SlideViewer';
 
 interface SlidePanelProps {
   facultyId: string;
@@ -52,6 +52,7 @@ export default function SlidePanel({ facultyId, specialtyId, subject }: SlidePan
     if (!q) return slides;
     return slides.filter((s) =>
       (s.organ ?? '').toLowerCase().includes(q) ||
+      (s.organ_bg ?? '').toLowerCase().includes(q) ||
       (s.konspekt_number ?? '').toLowerCase().includes(q) ||
       (s.stain ?? '').toLowerCase().includes(q) ||
       (s.slide_name ?? '').toLowerCase().includes(q),
@@ -133,7 +134,7 @@ export default function SlidePanel({ facultyId, specialtyId, subject }: SlidePan
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Търсене по орган или конспект № (напр. Oesophagus, 18a)…"
+              placeholder="Търсене по орган или конспект № (напр. Oesophagus, Хранопровод, 18a)…"
               className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7B1C1C] focus:border-transparent"
             />
           </div>
@@ -170,8 +171,11 @@ export default function SlidePanel({ facultyId, specialtyId, subject }: SlidePan
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 text-sm truncate">
-                      {s.organ || s.slide_name}
+                    <div
+                      className="font-semibold text-gray-900 text-sm leading-snug"
+                      style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                    >
+                      {organLabel(s)}
                     </div>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       {s.stain && (
