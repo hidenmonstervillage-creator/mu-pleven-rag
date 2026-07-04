@@ -76,6 +76,10 @@ export default function SlideViewer({ slide, onClose }: SlideViewerProps) {
   // ── Dragging (pointer events on the title bar; no external lib) ──────────────
   function onPointerDown(e: React.PointerEvent) {
     if (mode !== 'min' || !pos) return;
+    if (e.button !== 0) return; // left button only
+    // Don't hijack clicks on the control buttons (⛶ / ✕). Capturing the pointer
+    // on the title bar would swallow their click and break fullscreen-restore.
+    if ((e.target as HTMLElement).closest('button')) return;
     dragRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
     setDragging(true);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
