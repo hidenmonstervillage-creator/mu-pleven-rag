@@ -9,6 +9,9 @@ import MessageInput from '@/components/MessageInput';
 import PDFViewer, { PDFViewerPayload } from '@/components/PDFViewer';
 import SlidePanel from '@/components/SlidePanel';
 import AnatomyPanel from '@/components/AnatomyPanel';
+import AnatomySuggest from '@/components/AnatomySuggest';
+import AnatomyViewer from '@/components/AnatomyViewer';
+import { AnatomyModelEntry, AnatomyTopic } from '@/lib/anatomy-catalog';
 import { ChatMessage, ConversationHistory, SourceChunk } from '@/lib/types';
 
 // Persist conversation to localStorage
@@ -42,6 +45,14 @@ export default function HomePage() {
   const [pdfViewerPayload, setPdfViewerPayload] = useState<PDFViewerPayload | null>(null);
   const [askedQuestion, setAskedQuestion] = useState('');
   const [askNonce, setAskNonce] = useState(0);
+
+  // Shared 3D anatomy viewer state (opened by both the browse panel and chat suggestions)
+  const [anatomyModel, setAnatomyModel] = useState<AnatomyModelEntry | null>(null);
+  const [anatomyTopic, setAnatomyTopic] = useState<AnatomyTopic | null>(null);
+  const [anatomyMode, setAnatomyMode] = useState<'full' | 'min'>('full');
+  const openAnatomy = useCallback((model: AnatomyModelEntry, topic: AnatomyTopic, mode: 'full' | 'min') => {
+    setAnatomyModel(model); setAnatomyTopic(topic); setAnatomyMode(mode);
+  }, []);
 
   const handleOpenPdf = useCallback((payload: PDFViewerPayload) => {
     setPdfViewerPayload(payload);
@@ -229,11 +240,30 @@ export default function HomePage() {
         questionNonce={askNonce}
       />
 
-      {/* Self-hosted 3D anatomy — shown under the "Анатомия и хистология" subject */}
+      {/* Self-hosted 3D anatomy — browse panel (under "Анатомия и хистология") */}
       <AnatomyPanel
         facultyId={facultyId}
         specialtyId={specialtyId}
         subject={subject}
+        activeTopicId={anatomyTopic?.id}
+        onOpenTopic={(m, t) => openAnatomy(m, t, 'full')}
+      />
+
+      {/* Chat-driven 3D suggestion — any subject, opens the viewer minimized */}
+      <AnatomySuggest
+        question={askedQuestion}
+        questionNonce={askNonce}
+        onOpenTopic={(m, t) => openAnatomy(m, t, 'min')}
+      />
+
+      {/* The single shared 3D viewer (floating/minimizable) */}
+      <AnatomyViewer
+        open={!!anatomyModel}
+        modelFile={anatomyModel?.file ?? null}
+        modelLabel={anatomyModel?.label ?? ''}
+        topic={anatomyTopic}
+        initialMode={anatomyMode}
+        onClose={() => { setAnatomyModel(null); setAnatomyTopic(null); }}
       />
     </div>
   );

@@ -2,24 +2,23 @@
 
 import { useMemo, useState } from 'react';
 import { ANATOMY_MODELS, AnatomyModelEntry, AnatomyTopic } from '@/lib/anatomy-catalog';
-import AnatomyViewer from './AnatomyViewer';
 
 interface AnatomyPanelProps {
   facultyId: string;
   specialtyId: string;
   subject: string;
+  activeTopicId?: string;                                    // for highlight
+  onOpenTopic: (model: AnatomyModelEntry, topic: AnatomyTopic) => void;
 }
 
 // Stage 1: the 3D anatomy browser is offered under the "Анатомия и хистология"
 // subject. (Chat-driven contextual opening comes in a later stage.)
 const ENABLED_SUBJECT = 'Анатомия и хистология';
 
-export default function AnatomyPanel({ subject }: AnatomyPanelProps) {
+export default function AnatomyPanel({ subject, activeTopicId, onOpenTopic }: AnatomyPanelProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [openModelId, setOpenModelId] = useState<string | null>(null);
-  const [activeModel, setActiveModel] = useState<AnatomyModelEntry | null>(null);
-  const [activeTopic, setActiveTopic] = useState<AnatomyTopic | null>(null);
 
   const q = query.trim().toLowerCase();
 
@@ -40,8 +39,7 @@ export default function AnatomyPanel({ subject }: AnatomyPanelProps) {
   }, [q]);
 
   function openTopic(model: AnatomyModelEntry, topic: AnatomyTopic) {
-    setActiveModel(model);
-    setActiveTopic(topic);
+    onOpenTopic(model, topic);
     setOpen(false);
   }
 
@@ -143,7 +141,7 @@ export default function AnatomyPanel({ subject }: AnatomyPanelProps) {
                                   key={t.id}
                                   onClick={() => openTopic(model, t)}
                                   className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                                    activeTopic?.id === t.id
+                                    activeTopicId === t.id
                                       ? 'bg-slate-700 text-white border-slate-700'
                                       : t.whole
                                         ? 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -166,15 +164,6 @@ export default function AnatomyPanel({ subject }: AnatomyPanelProps) {
           )}
         </div>
       </div>
-
-      {/* The 3D viewer (floating, minimizable) */}
-      <AnatomyViewer
-        open={!!activeModel}
-        modelFile={activeModel?.file ?? null}
-        modelLabel={activeModel?.label ?? ''}
-        topic={activeTopic}
-        onClose={() => { setActiveModel(null); setActiveTopic(null); }}
-      />
     </>
   );
 }

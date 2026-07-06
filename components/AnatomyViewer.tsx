@@ -12,6 +12,7 @@ interface AnatomyViewerProps {
   modelFile: string | null;   // resolves to /models/<file>.glb
   modelLabel: string;
   topic: AnatomyTopic | null; // isolate this topic (whole model if null/whole)
+  initialMode?: 'full' | 'min'; // browse → full, chat suggestion → min
   onClose: () => void;
 }
 
@@ -27,7 +28,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function isMesh(o: any): o is THREE.Mesh { return o && o.isMesh; }
 
-export default function AnatomyViewer({ open, modelFile, modelLabel, topic, onClose }: AnatomyViewerProps) {
+export default function AnatomyViewer({ open, modelFile, modelLabel, topic, initialMode = 'full', onClose }: AnatomyViewerProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<Engine | null>(null);
   const [status, setStatus] = useState('Зареждане…');
@@ -42,8 +43,8 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, onCl
   const boxRef = useRef<HTMLDivElement | null>(null);
   const minimized = open && mode === 'min';
 
-  // Reset to full whenever a new model opens.
-  useEffect(() => { if (modelFile) setMode('full'); }, [modelFile]);
+  // Adopt the requested mode whenever a new model/topic opens (browse=full, chat=min).
+  useEffect(() => { if (modelFile) setMode(initialMode); }, [modelFile, topic?.id, initialMode]);
 
   // Place the floating window when entering minimized mode without a position.
   useEffect(() => {
@@ -98,10 +99,23 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, onCl
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z) || 1;
-      const dist = maxDim / (2 * Math.tan((Math.PI * camera.fov) / 360));
-      camera.position.set(center.x, center.y + size.y * 0.05, center.z + dist * 1.7);
-      camera.near = maxDim / 100; camera.far = maxDim * 100; camera.updateProjectionMatrix();
+      // Aspect-aware fit: distance to contain the box both vertically and
+      // horizontally, so tall/thin isolations aren't framed out of view.
+      const fov = (camera.fov * Math.PI) / 180;
+      const halfV = (size.y / 2) / Math.tan(fov / 2);
+      const halfH = (size.x / 2) / (Math.tan(fov / 2) * (camera.aspect || 1));
+      const dist = Math.max(halfV, halfH, size.z / 2) * 1.6 || maxDim;
+      camera.position.set(center.x, center.y, center.z + dist);
+      camera.near = Math.max(maxDim / 1000, dist / 1000);
+      camera.far = dist * 50 + maxDim * 10;
+      camera.updateProjectionMatrix();
       controls.target.copy(center); controls.update();
+    }
+    // Frame after layout/resize settles (two rAFs) so camera.aspect is correct.
+    function scheduleFrame() {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!disposed) { sizeToMount(); frameVisible(); }
+      }));
     }
 
     function resolveStructure(obj: THREE.Object3D): THREE.Object3D {
@@ -141,7 +155,7 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, onCl
         gltf.scene.position.sub(center);
         scene.add(gltf.scene);
         sizeToMount();
-        frameVisible();
+        scheduleFrame();
         setVisibleCount(meshes.length);
         setReady(true);
         setStatus(`${meshes.length} структури`);
@@ -154,13 +168,13 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, onCl
               if (wanted.has(g.name)) g.traverse((o) => { if (isMesh(o)) keep.add(o); });
             });
             meshes.forEach((m) => { m.visible = keep.has(m); });
-            frameVisible();
+            scheduleFrame();
             setVisibleCount(keep.size);
             return keep.size;
           },
           showAll: () => {
             meshes.forEach((m) => { m.visible = true; });
-            frameVisible();
+            scheduleFrame();
             setVisibleCount(meshes.length);
             return meshes.length;
           },
@@ -256,8 +270,8 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, onCl
       {/* Title bar (drag handle when minimized) */}
       <div
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
-        className="flex items-center justify-between flex-shrink-0"
-        style={{ backgroundColor: '#7B1C1C', padding: minimized ? '5px 8px 5px 10px' : '9px 14px', cursor: minimized ? 'move' : 'default', touchAction: minimized ? 'none' : 'auto' }}
+        className="flex items-center justify-between"
+        style={{ flex: '0 0 auto', backgroundColor: '#7B1C1C', padding: minimized ? '5px 8px 5px 10px' : '9px 14px', cursor: minimized ? 'move' : 'default', touchAction: minimized ? 'none' : 'auto' }}
       >
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-white" aria-hidden="true" style={{ fontSize: minimized ? 14 : 17 }}>🦴</span>
@@ -290,7 +304,7 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, onCl
       </div>
 
       {/* Canvas + overlays */}
-      <div className="flex-1 relative overflow-hidden" style={{ background: '#0f1117' }}>
+      <div className="relative overflow-hidden" style={{ flex: '1 1 0%', minHeight: 0, background: '#0f1117' }}>
         <div ref={mountRef} className="absolute inset-0" />
         {!ready && (
           <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm gap-2 pointer-events-none">
