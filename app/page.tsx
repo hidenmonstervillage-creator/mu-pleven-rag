@@ -8,6 +8,7 @@ import ChatArea from '@/components/ChatArea';
 import MessageInput from '@/components/MessageInput';
 import PDFViewer, { PDFViewerPayload } from '@/components/PDFViewer';
 import SlidePanel from '@/components/SlidePanel';
+import AnatomyPanel from '@/components/AnatomyPanel';
 import { ChatMessage, ConversationHistory, SourceChunk } from '@/lib/types';
 
 // Persist conversation to localStorage
@@ -226,6 +227,13 @@ export default function HomePage() {
         subject={subject}
         question={askedQuestion}
         questionNonce={askNonce}
+      />
+
+      {/* Self-hosted 3D anatomy — shown under the "Анатомия и хистология" subject */}
+      <AnatomyPanel
+        facultyId={facultyId}
+        specialtyId={specialtyId}
+        subject={subject}
       />
     </div>
   );
