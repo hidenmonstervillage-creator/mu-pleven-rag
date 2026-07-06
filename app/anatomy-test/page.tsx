@@ -75,6 +75,8 @@ export default function AnatomyTestPage() {
     apiRef.current = { showAll };
 
     // ── Load the model ──
+    // ?model=<name> selects which GLB in /public/models to load (default hand).
+    const modelName = (new URLSearchParams(window.location.search).get('model') || 'hand').replace(/[^a-z0-9-]/gi, '');
     const t0 = performance.now();
     const loader = new GLTFLoader();
     // The AnatomyTOOL GLBs are Draco-compressed (Blender export) — decode locally
@@ -83,7 +85,7 @@ export default function AnatomyTestPage() {
     draco.setDecoderPath('/draco/gltf/');
     loader.setDRACOLoader(draco);
     loader.load(
-      '/models/hand.glb',
+      `/models/${modelName}.glb`,
       (gltf) => {
         if (disposed) return;
         root = gltf.scene;
