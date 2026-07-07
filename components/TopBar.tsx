@@ -1,9 +1,9 @@
 'use client';
 
-import Image from 'next/image';
 import { FACULTIES } from '@/lib/faculties';
 import { Faculty, Specialty } from '@/lib/types';
 import SubjectCombobox from '@/components/SubjectCombobox';
+import Logo from '@/components/Logo';
 
 interface TopBarProps {
   facultyId: string;
@@ -45,15 +45,7 @@ export default function TopBar({
     <header className="flex items-center gap-4 px-5 py-3 bg-white border-b border-[#E5E7EB] flex-shrink-0">
       {/* Logo + brand */}
       <div className="flex items-center gap-3 flex-shrink-0">
-        <div className="relative h-10 w-10">
-          <Image
-            src="/Logo_MU_BG_New.png"
-            alt="МУ Плевен"
-            fill
-            className="object-contain"
-            priority
-          />
-        </div>
+        <Logo className="h-10 w-10" />
         <div className="flex flex-col leading-tight">
           <span className="text-[#7B1C1C] font-bold text-base">МУ-Плевен</span>
           <span className="text-gray-500 text-xs">AI Library</span>

@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { ChatMessage } from '@/lib/types';
 import SourceCard from './SourceCard';
 import { PDFViewerPayload } from './PDFViewer';
-import Image from 'next/image';
+import Logo from './Logo';
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -17,9 +17,7 @@ interface ChatAreaProps {
 function WelcomeScreen() {
   return (
     <div className="flex flex-col items-center justify-center h-full py-16 px-6 text-center">
-      <div className="relative w-20 h-20 mb-5">
-        <Image src="/Logo_MU_BG_New.png" alt="МУ Плевен" fill className="object-contain" priority />
-      </div>
+      <Logo className="w-20 h-20 mb-5" />
       <h1 className="text-2xl font-bold text-[#7B1C1C] mb-2">МУ-Плевен AI Library</h1>
       <p className="text-gray-500 mb-10 max-w-md text-sm leading-relaxed">
         Изберете факултет, специалност и предмет от горното меню, след което задайте вашия академичен въпрос.
