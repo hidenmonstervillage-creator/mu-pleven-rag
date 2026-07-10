@@ -5,6 +5,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { AnatomyTopic, sanitizeName, cleanStructureName } from '@/lib/anatomy-catalog';
 
 interface AnatomyViewerProps {
@@ -20,6 +24,8 @@ interface Engine {
   isolate: (cleanGroups: string[]) => number;
   showAll: () => number;
   resize: () => void;
+  highlight: (obj: THREE.Object3D | null) => void;
+  clearHighlight: () => void;
 }
 
 const MIN_W = 440, MIN_H = 340;
@@ -31,6 +37,9 @@ function isMesh(o: any): o is THREE.Mesh { return o && o.isMesh; }
 export default function AnatomyViewer({ open, modelFile, modelLabel, topic, initialMode = 'full', onClose }: AnatomyViewerProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<Engine | null>(null);
+  // The currently outlined node(s). Kept as a ref (imperative, outside React) so
+  // isolate()/click handlers can inspect and clear the glow without re-rendering.
+  const highlightedRef = useRef<THREE.Object3D[]>([]);
   const [status, setStatus] = useState('Зареждане…');
   const [ready, setReady] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -59,6 +68,7 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
     const mount = mountRef.current;
     if (!mount || !modelFile) return;
     setReady(false); setSelected(null); setStatus('Зареждане…');
+    highlightedRef.current = [];
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0f1117);
@@ -86,10 +96,33 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
     let sceneRoot: THREE.Object3D | null = null;
     let disposed = false, rafId = 0;
 
+    // ── Post-processing: neon-green selection outline (no material mutation) ────
+    // OutlinePass renders the glow as a screen-space pass over the selected
+    // objects, so it never touches the shared GLB materials — highlighting one
+    // structure can't recolor its color-class.
+    const w0 = mount.clientWidth || 1, h0 = mount.clientHeight || 1;
+    const composer = new EffectComposer(renderer);
+    composer.setPixelRatio(renderer.getPixelRatio()); // renderer ratio is fixed → stays in sync
+    composer.setSize(w0, h0);
+    composer.addPass(new RenderPass(scene, camera));
+    const outlinePass = new OutlinePass(new THREE.Vector2(w0, h0), scene, camera);
+    outlinePass.edgeStrength = 6.0;
+    outlinePass.edgeGlow = 0.4;
+    outlinePass.edgeThickness = 1.5;
+    outlinePass.pulsePeriod = 0;                    // steady, not pulsing
+    outlinePass.visibleEdgeColor.set('#39FF14');    // neon green
+    outlinePass.hiddenEdgeColor.set('#0a3d0a');     // dim green for occluded edges
+    outlinePass.selectedObjects = [];
+    composer.addPass(outlinePass);
+    composer.addPass(new OutputPass());
+
     function sizeToMount() {
       const w = mount!.clientWidth || 1, h = mount!.clientHeight || 1;
       renderer.setSize(w, h, false);
       camera.aspect = w / h; camera.updateProjectionMatrix();
+      // Composer + outline pass carry their own render targets — resize both.
+      composer.setSize(w, h);
+      outlinePass.setSize(w, h);
     }
 
     function frameVisible() {
@@ -168,6 +201,14 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
               if (wanted.has(g.name)) g.traverse((o) => { if (isMesh(o)) keep.add(o); });
             });
             meshes.forEach((m) => { m.visible = keep.has(m); });
+            // If the outlined node is no longer visible after isolating, drop the
+            // glow so it doesn't linger on a hidden structure.
+            const hl = highlightedRef.current[0];
+            if (hl) {
+              let anyVisible = false;
+              hl.traverse((o) => { if (isMesh(o) && keep.has(o)) anyVisible = true; });
+              if (!anyVisible) { outlinePass.selectedObjects = []; highlightedRef.current = []; }
+            }
             scheduleFrame();
             setVisibleCount(keep.size);
             return keep.size;
@@ -179,6 +220,19 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
             return meshes.length;
           },
           resize: sizeToMount,
+          highlight: (obj: THREE.Object3D | null) => {
+            // Outline the whole resolved node — if it's a group, OutlinePass
+            // outlines every descendant mesh, so the named structure lights up
+            // as one. No scheduleFrame(): the animate() loop renders every frame
+            // (so the glow shows next tick) and reframing here would jump the
+            // camera on each click.
+            outlinePass.selectedObjects = obj ? [obj] : [];
+            highlightedRef.current = obj ? [obj] : [];
+          },
+          clearHighlight: () => {
+            outlinePass.selectedObjects = [];
+            highlightedRef.current = [];
+          },
         };
       },
       (ev) => { if (ev.total) setStatus(`Зареждане… ${Math.round((ev.loaded / ev.total) * 100)}%`); },
@@ -195,9 +249,16 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
       pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(meshes.filter((m) => m.visible), true);
-      if (!hits.length) return;
+      if (!hits.length) {
+        // Click on empty space = deselect: clear the name overlay and the glow.
+        setSelected(null);
+        engineRef.current?.clearHighlight();
+        return;
+      }
       const s = resolveStructure(hits[0].object);
       setSelected(cleanStructureName(originalName.get(s) ?? s.name));
+      // Glow the SAME node the name resolves to, so outline ↔ label always agree.
+      engineRef.current?.highlight(s);
     }
     renderer.domElement.addEventListener('pointerdown', onDown);
     renderer.domElement.addEventListener('pointerup', onUp);
@@ -205,7 +266,7 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
     const ro = new ResizeObserver(() => sizeToMount());
     ro.observe(mount);
 
-    function animate() { rafId = requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
+    function animate() { rafId = requestAnimationFrame(animate); controls.update(); composer.render(); }
     animate();
 
     return () => {
@@ -215,6 +276,10 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('pointerup', onUp);
       controls.dispose(); draco.dispose();
+      // Release outline selection + composer render targets before mesh disposal.
+      outlinePass.selectedObjects = [];
+      outlinePass.dispose();
+      composer.dispose();
       scene.traverse((o) => {
         if (isMesh(o)) {
           o.geometry?.dispose();
@@ -225,6 +290,7 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
       engineRef.current = null;
+      highlightedRef.current = [];
     };
   }, [modelFile]);
 
@@ -284,7 +350,7 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           {ready && (
-            <button onClick={() => { setSelected(null); engineRef.current?.showAll(); }}
+            <button onClick={() => { setSelected(null); engineRef.current?.clearHighlight(); engineRef.current?.showAll(); }}
               className="hidden sm:inline text-xs text-white/90 hover:text-white border border-white/30 rounded px-2 py-1 mr-1 hover:bg-white/10 transition-colors"
               title="Покажи всичко">Покажи всичко</button>
           )}
