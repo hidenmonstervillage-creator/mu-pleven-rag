@@ -92,18 +92,40 @@ export async function POST(req: NextRequest) {
       });
 
       const raw = rerankResponse.choices[0]?.message?.content?.trim() ?? '';
-      const scores: number[] = JSON.parse(raw);
 
-      if (Array.isArray(scores) && scores.length === preRanked.length) {
+      // gpt-4o-mini frequently wraps its answer in a ```json ... ``` markdown
+      // fence, so a bare JSON.parse(raw) throws on every request and retrieval
+      // silently falls back to raw cosine order. Strip any fence, then extract
+      // the first [...] array before parsing.
+      const cleaned = raw.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+      const arrayMatch = cleaned.match(/\[[\s\S]*?\]/);
+      const scores: number[] = JSON.parse(arrayMatch ? arrayMatch[0] : cleaned);
+
+      // These are relevance scores (0–10), one per candidate chunk — NOT indices.
+      // Duplicate scores and values above the candidate count are legitimate
+      // (e.g. [6, 1, 8, 0]), so we only require an array of finite numbers whose
+      // length matches the candidate list.
+      const validScores =
+        Array.isArray(scores) &&
+        scores.length === preRanked.length &&
+        scores.every((s) => typeof s === 'number' && Number.isFinite(s));
+
+      if (validScores) {
         const scored = preRanked.map((chunk, i) => ({ chunk, score: scores[i] ?? 0 }));
         scored.sort((a, b) => b.score - a.score);
 
         const passing = scored.filter((s) => s.score >= 6);
         const final = passing.length >= 2 ? passing : scored.slice(0, 2);
         sources = final.map((s) => s.chunk);
+      } else {
+        console.warn(
+          `Rerank returned unexpected shape — using pgvector order. ` +
+          `Expected ${preRanked.length} numbers, got: ${raw}`
+        );
       }
     } catch (err) {
-      // Reranking failed — fall back to pgvector order
+      // Parse or API failure — fall back to pgvector order, logged (not silent)
+      // so a future regression is visible instead of quietly degrading ranking.
       console.warn('Reranking failed, using pgvector order:', err);
     }
   }
@@ -111,15 +133,17 @@ export async function POST(req: NextRequest) {
   // Step 5: build context string with source labels
   const contextParts = sources.map((chunk, i) => {
     const typeLabel = chunk.file_type === 'textbook' ? 'Учебник' : 'Лекция';
-    const pageLabel = chunk.page_number ? `, стр. ${chunk.page_number}` : '';
-    return `[${i + 1}] ${typeLabel}: ${chunk.clean_title}${pageLabel}\n${chunk.content}`;
+    // Page numbers are deliberately withheld from the model — they are shown to
+    // the student only on the source cards (SourceCard.tsx). Keep the [n] label
+    // so the model can still reference which source a claim came from.
+    return `[${i + 1}] ${typeLabel}: ${chunk.clean_title}\n${chunk.content}`;
   });
 
   const context = contextParts.length > 0
     ? contextParts.join('\n\n---\n\n')
     : 'Няма намерени релевантни материали за тази тема в избрания предмет.';
 
-  const systemPrompt = `Ти си AI академичен асистент на Медицински университет Плевен. Отговаряй ВИНАГИ на български език. Използвай САМО информацията от предоставения контекст по-долу. Не измисляй информация. Когато използваш информация от даден източник, го споменавай естествено в текста — например 'Според учебника по Анатомия (стр. 42)...' или 'Както е обяснено в лекцията по Физиология (стр. 15)...'. Отговаряй подробно и академично. Използвай само най-релевантните части от контекста. Не споменавай източници, които не са пряко свързани с въпроса.
+  const systemPrompt = `Ти си AI академичен асистент на Медицински университет Плевен. Отговаряй ВИНАГИ на български език. Използвай САМО информацията от предоставения контекст по-долу. Не измисляй информация. Основавай всяко твърдение на предоставените източници и ги посочвай по техния номер — например '[1]' или 'според източник 1', а НЕ по номер на страница. НЕ измисляй и НЕ посочвай номера на страници (стр.) в отговора си — препратките към страниците се показват отделно на студента върху картите с източници. Отговаряй подробно и академично. Използвай само най-релевантните части от контекста. Не споменавай източници, които не са пряко свързани с въпроса.
 
 КОНТЕКСТ:
 ${context}`;
