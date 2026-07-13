@@ -173,6 +173,27 @@ export const ANATOMY_MODELS: AnatomyModelEntry[] = [
       { id: 'vert-all', label: 'Typical vertebrae (C / T / L)', groups: [], whole: true, region: 'Spine' },
     ],
   },
+  {
+    // muscles-thorax-abdomen.glb — descriptive single-style groups (NOT compound
+    // "Region - system"), so each group is an explicit per-group topic.
+    // Confirmed: sanitizeName("Muscles of thorax") → "Muscles_of_thorax", which
+    // matches the loader's runtime node names (three's PropertyBinding does the
+    // same whitespace→"_" transform).
+    id: 'muscles-trunk',
+    file: 'muscles-trunk',
+    label: 'Muscles of thorax, abdomen & back',
+    bodyRegion: 'Trunk',
+    topics: [
+      { id: 'mtr-all',     label: 'Trunk muscles — everything', groups: [],                        whole: true, region: 'Trunk' },
+      { id: 'mtr-thorax',  label: 'Muscles of thorax',          groups: ['Muscles of thorax'],     region: 'Trunk', system: 'muscles' },
+      { id: 'mtr-abdomen', label: 'Muscles of abdomen',         groups: ['Muscles of abdomen'],    region: 'Trunk', system: 'muscles' },
+      { id: 'mtr-back',    label: 'Muscles of back',            groups: ['Muscles of back'],       region: 'Trunk', system: 'muscles' },
+      { id: 'mtr-ul',      label: 'Muscles of upper limb',      groups: ['Muscles of upper limb'], region: 'Trunk', system: 'muscles' },
+      { id: 'mtr-bones',   label: 'Bones',                      groups: ['Bones'],                 region: 'Trunk', system: 'bones' },
+      { id: 'mtr-fascia',  label: 'Fascia',                     groups: ['Fascia'],                region: 'Trunk', system: 'fascia' },
+      { id: 'mtr-artic',   label: 'Articular system',           groups: ['Articular system'],      region: 'Trunk', system: 'articular' },
+    ],
+  },
 ];
 
 export function findModel(id: string): AnatomyModelEntry | undefined {
