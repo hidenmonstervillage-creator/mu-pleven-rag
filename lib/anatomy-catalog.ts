@@ -194,6 +194,28 @@ export const ANATOMY_MODELS: AnatomyModelEntry[] = [
       { id: 'mtr-artic',   label: 'Articular system',           groups: ['Articular system'],      region: 'Trunk', system: 'articular' },
     ],
   },
+  {
+    // muscle-attachments.glb (insertions & origins) — descriptive single-style
+    // groups → explicit per-group topics. id === file === 'muscle-attachments'
+    // (keep them equal so the generated 'muscle-attachments|<group>' tokens
+    // resolve via findModel). sanitizeName("Muscles of the Neck") →
+    // "Muscles_of_the_Neck" etc. matches the loader's runtime node names.
+    id: 'muscle-attachments',
+    file: 'muscle-attachments',
+    label: 'Muscle attachments (insertions & origins)',
+    bodyRegion: 'Full body',
+    topics: [
+      { id: 'ma-all',     label: 'Muscle attachments — everything', groups: [],                        whole: true, region: 'Muscle attachments' },
+      { id: 'ma-head',    label: 'Muscles of head',       groups: ['Muscles of Head'],       region: 'Muscle attachments', system: 'muscles' },
+      { id: 'ma-neck',    label: 'Muscles of the neck',   groups: ['Muscles of the Neck'],   region: 'Muscle attachments', system: 'muscles' },
+      { id: 'ma-back',    label: 'Muscles of back',       groups: ['Muscles of Back'],       region: 'Muscle attachments', system: 'muscles' },
+      { id: 'ma-thorax',  label: 'Muscles of thorax',     groups: ['Muscles of Thorax'],     region: 'Muscle attachments', system: 'muscles' },
+      { id: 'ma-abdomen', label: 'Muscles of abdomen',    groups: ['Muscles of Abdomen'],    region: 'Muscle attachments', system: 'muscles' },
+      { id: 'ma-ul',      label: 'Muscles of upper limb', groups: ['Muscles of Upper limb'], region: 'Muscle attachments', system: 'muscles' },
+      { id: 'ma-ll',      label: 'Muscles of lower limb', groups: ['Muscles of Lower limb'], region: 'Muscle attachments', system: 'muscles' },
+      { id: 'ma-bones',   label: 'Bones and cartilages',  groups: ['Bones and cartilages'],  region: 'Muscle attachments', system: 'bones' },
+    ],
+  },
 ];
 
 export function findModel(id: string): AnatomyModelEntry | undefined {

@@ -67,6 +67,8 @@ const REGIONS: RegionDef[] = [
   { syn: ['skeleton', 'скелет'], modelId: 'overview-skeleton' },
   // trunk muscles (thorax / abdomen / back) — muscles-thorax-abdomen.glb
   { syn: ['trunk', 'torso', 'truncus', 'торс', 'тяло', 'гръден кош', 'корем', 'гръб', 'коремни мускули', 'гръдни мускули'], modelId: 'muscles-trunk', region: 'Trunk' },
+  // muscle attachments / insertions & origins — muscle-attachments.glb
+  { syn: ['muscle attachments', 'insertions', 'origins', 'залавни места', 'мускулни залавни места', 'прикрепване на мускули', 'инсерции'], modelId: 'muscle-attachments', region: 'Muscle attachments' },
 ];
 const REGION_TOKENS = REGIONS.map((r) => ({ ...r, synT: r.syn.map(synTokens) }));
 
