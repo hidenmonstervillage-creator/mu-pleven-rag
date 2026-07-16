@@ -69,6 +69,13 @@ const REGIONS: RegionDef[] = [
   { syn: ['trunk', 'torso', 'truncus', 'торс', 'тяло', 'гръден кош', 'корем', 'гръб', 'коремни мускули', 'гръдни мускули'], modelId: 'muscles-trunk', region: 'Trunk' },
   // muscle attachments / insertions & origins — muscle-attachments.glb
   { syn: ['muscle attachments', 'insertions', 'origins', 'залавни места', 'мускулни залавни места', 'прикрепване на мускули', 'инсерции'], modelId: 'muscle-attachments', region: 'Muscle attachments' },
+  // heart chambers — heart.glb
+  { syn: ['heart', 'cardiac', 'cor', 'сърце', 'сърдечен', 'предсърдие', 'камера на сърцето', 'сърдечни камери'], modelId: 'heart', region: 'Heart' },
+  // organs (BodyParts3D)
+  { syn: ['brain', 'cerebrum', 'encephalon', 'мозък', 'главен мозък', 'мозъчен'], modelId: 'brain', region: 'Brain' },
+  { syn: ['lung', 'lungs', 'pulmo', 'бял дроб', 'бели дробове', 'дробове'], modelId: 'lungs', region: 'Lungs' },
+  { syn: ['kidney', 'kidneys', 'ren', 'бъбрек', 'бъбреци'], modelId: 'kidneys', region: 'Kidneys' },
+  { syn: ['liver', 'hepar', 'черен дроб', 'чернодробен'], modelId: 'liver', region: 'Liver' },
 ];
 const REGION_TOKENS = REGIONS.map((r) => ({ ...r, synT: r.syn.map(synTokens) }));
 
@@ -82,6 +89,11 @@ const SYSTEMS: Array<{ system: string; syn: string[] }> = [
   { system: 'cartilages', syn: ['cartilage', 'cartilages', 'хрущял', 'хрущяли'] },
   { system: 'ligaments', syn: ['ligament', 'ligaments', 'връзка', 'връзки', 'лигамент', 'лигаменти'] },
   { system: 'fascia', syn: ['fascia', 'fasciae', 'фасция', 'фасции'] },
+  { system: 'heart', syn: ['heart', 'cardiac', 'сърце', 'сърдечен'] },
+  { system: 'brain', syn: ['brain', 'cerebral', 'мозък', 'мозъчен'] },
+  { system: 'lungs', syn: ['lung', 'lungs', 'pulmonary', 'бял дроб', 'бели дробове'] },
+  { system: 'kidneys', syn: ['kidney', 'kidneys', 'renal', 'бъбрек', 'бъбреци'] },
+  { system: 'liver', syn: ['liver', 'hepatic', 'черен дроб', 'чернодробен'] },
 ];
 const SYSTEM_TOKENS = SYSTEMS.map((s) => ({ ...s, synT: s.syn.map(synTokens) }));
 

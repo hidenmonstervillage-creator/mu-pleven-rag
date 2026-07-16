@@ -79,7 +79,16 @@ export default function AnatomyPanel({ subject, activeTopicId, onOpenTopic }: An
             <span className="text-white text-lg" aria-hidden="true">🦴</span>
             <div className="flex flex-col min-w-0">
               <span className="text-white font-semibold text-sm leading-tight">3D Анатомия</span>
-              <span className="text-slate-300 text-xs mt-0.5 truncate">{ANATOMY_MODELS.length} модела · Open3DModel · CC BY-SA 4.0</span>
+              {/* CC BY-SA attribution for both model sources (full text in title). */}
+              <span
+                className="text-slate-300 text-xs mt-0.5 truncate"
+                title={
+                  'Open3DModel (AnatomyTOOL) — CC BY-SA 4.0. ' +
+                  'BodyParts3D, © The Database Center for Life Science, licensed under CC Attribution-Share Alike 2.1 Japan.'
+                }
+              >
+                {ANATOMY_MODELS.length} модела · Open3DModel (CC BY-SA 4.0) · BodyParts3D (CC BY-SA 2.1 JP)
+              </span>
             </div>
           </div>
           <button onClick={() => setOpen(false)} className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-white hover:bg-white/20" aria-label="Затвори">

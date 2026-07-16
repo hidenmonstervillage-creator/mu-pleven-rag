@@ -1,6 +1,11 @@
 // ── 3D anatomy catalog ──────────────────────────────────────────────────────
-// Per-model topic map for the self-hosted AnatomyTOOL Open3DModel GLBs
-// (CC BY-SA 4.0). Each topic isolates one or more scene groups within a model.
+// Per-model topic map for the self-hosted GLBs. Each topic isolates one or more
+// scene groups within a model.
+//
+// MODEL SOURCES / ATTRIBUTION (both CC BY-SA — attribution is required):
+//   • AnatomyTOOL Open3DModel — CC BY-SA 4.0 (limbs, skull, skeleton, muscles).
+//   • BodyParts3D, © The Database Center for Life Science, licensed under
+//     CC Attribution-Share Alike 2.1 Japan (heart, brain, lungs, kidneys, liver).
 //
 // NAME SANITIZATION: Three's GLTFLoader rewrites node names — whitespace → "_"
 // and the reserved chars []./:  are stripped (so "Arm - muscles" becomes
@@ -214,6 +219,83 @@ export const ANATOMY_MODELS: AnatomyModelEntry[] = [
       { id: 'ma-ul',      label: 'Muscles of upper limb', groups: ['Muscles of Upper limb'], region: 'Muscle attachments', system: 'muscles' },
       { id: 'ma-ll',      label: 'Muscles of lower limb', groups: ['Muscles of Lower limb'], region: 'Muscle attachments', system: 'muscles' },
       { id: 'ma-bones',   label: 'Bones and cartilages',  groups: ['Bones and cartilages'],  region: 'Muscle attachments', system: 'bones' },
+    ],
+  },
+  {
+    // heart.glb (BodyParts3D partof, CC-BY-SA 2.1 JP) — 5 non-overlapping named
+    // chambers + fibrous skeleton. id === file === 'heart'. sanitizeName maps
+    // "right atrium" → "right_atrium" etc. to the loader's runtime node names.
+    id: 'heart',
+    file: 'heart',
+    label: 'Heart (chambers)',
+    bodyRegion: 'Thoracic organs',
+    topics: [
+      { id: 'heart-all', label: 'Heart — everything', groups: [],                            whole: true, region: 'Heart' },
+      { id: 'heart-ra',  label: 'Right atrium',       groups: ['right atrium'],              region: 'Heart', system: 'heart' },
+      { id: 'heart-la',  label: 'Left atrium',        groups: ['left atrium'],               region: 'Heart', system: 'heart' },
+      { id: 'heart-rv',  label: 'Right ventricle',    groups: ['right ventricle'],           region: 'Heart', system: 'heart' },
+      { id: 'heart-lv',  label: 'Left ventricle',     groups: ['left ventricle'],            region: 'Heart', system: 'heart' },
+      { id: 'heart-fs',  label: 'Fibrous skeleton',   groups: ['fibrous skeleton of heart'], region: 'Heart', system: 'heart' },
+    ],
+  },
+  {
+    // brain.glb (BodyParts3D) — major subdivisions. Dropped: whole "brain"
+    // (container), "brainstem" (⊇ midbrain+pons+medulla), "hypothalamus"
+    // (⊆ diencephalon) — all pure supersets/subsets that would overlap.
+    id: 'brain',
+    file: 'brain',
+    label: 'Brain',
+    bodyRegion: 'Head & neck organs',
+    topics: [
+      { id: 'brain-all',   label: 'Brain — everything',  groups: [],                      whole: true, region: 'Brain' },
+      { id: 'brain-cer',   label: 'Cerebrum',            groups: ['cerebrum'],            region: 'Brain', system: 'brain' },
+      { id: 'brain-cbl',   label: 'Cerebellum',          groups: ['cerebellum'],          region: 'Brain', system: 'brain' },
+      { id: 'brain-mid',   label: 'Midbrain',            groups: ['midbrain'],            region: 'Brain', system: 'brain' },
+      { id: 'brain-pons',  label: 'Pons',                groups: ['pons'],                region: 'Brain', system: 'brain' },
+      { id: 'brain-med',   label: 'Medulla oblongata',   groups: ['medulla oblongata'],   region: 'Brain', system: 'brain' },
+      { id: 'brain-dien',  label: 'Diencephalon',        groups: ['diencephalon'],        region: 'Brain', system: 'brain' },
+      { id: 'brain-vent',  label: 'Ventricular system',  groups: ['ventricular system'],  region: 'Brain', system: 'brain' },
+    ],
+  },
+  {
+    // lungs.glb (BodyParts3D) — right/left lung. BodyParts3D "partof" has no
+    // separate lobe concepts, so lobes are not offered.
+    id: 'lungs',
+    file: 'lungs',
+    label: 'Lungs',
+    bodyRegion: 'Thoracic organs',
+    topics: [
+      { id: 'lungs-all', label: 'Lungs — everything', groups: [],             whole: true, region: 'Lungs' },
+      { id: 'lungs-r',   label: 'Right lung',         groups: ['right lung'], region: 'Lungs', system: 'lungs' },
+      { id: 'lungs-l',   label: 'Left lung',          groups: ['left lung'],  region: 'Lungs', system: 'lungs' },
+    ],
+  },
+  {
+    // kidneys.glb (BodyParts3D) — right/left kidney (no cortex/medulla/pelvis
+    // as separate "partof" concepts).
+    id: 'kidneys',
+    file: 'kidneys',
+    label: 'Kidneys',
+    bodyRegion: 'Abdominal organs',
+    topics: [
+      { id: 'kid-all', label: 'Kidneys — everything', groups: [],               whole: true, region: 'Kidneys' },
+      { id: 'kid-r',   label: 'Right kidney',         groups: ['right kidney'], region: 'Kidneys', system: 'kidneys' },
+      { id: 'kid-l',   label: 'Left kidney',          groups: ['left kidney'],  region: 'Kidneys', system: 'kidneys' },
+    ],
+  },
+  {
+    // liver.glb (BodyParts3D) — the two main lobes. Dropped: whole "liver"
+    // (container) and "caudate lobe" (⊆ left lobe). NOTE: the lobes span ~42 of
+    // the whole-liver's 60 element surfaces, so non-lobar structures (vessels,
+    // bare area, porta) are not included. Quadrate lobe absent from the source.
+    id: 'liver',
+    file: 'liver',
+    label: 'Liver (lobes)',
+    bodyRegion: 'Abdominal organs',
+    topics: [
+      { id: 'liver-all', label: 'Liver — everything', groups: [],                       whole: true, region: 'Liver' },
+      { id: 'liver-r',   label: 'Right lobe',         groups: ['right lobe of liver'],  region: 'Liver', system: 'liver' },
+      { id: 'liver-l',   label: 'Left lobe',          groups: ['left lobe of liver'],   region: 'Liver', system: 'liver' },
     ],
   },
 ];
