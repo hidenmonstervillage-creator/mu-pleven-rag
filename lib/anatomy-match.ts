@@ -76,6 +76,18 @@ const REGIONS: RegionDef[] = [
   { syn: ['lung', 'lungs', 'pulmo', 'бял дроб', 'бели дробове', 'дробове'], modelId: 'lungs', region: 'Lungs' },
   { syn: ['kidney', 'kidneys', 'ren', 'бъбрек', 'бъбреци'], modelId: 'kidneys', region: 'Kidneys' },
   { syn: ['liver', 'hepar', 'черен дроб', 'чернодробен'], modelId: 'liver', region: 'Liver' },
+  // GI / endocrine / pelvic organs (BodyParts3D)
+  { syn: ['pancreas', 'панкреас', 'задстомашна жлеза'], modelId: 'pancreas', region: 'Pancreas' },
+  { syn: ['stomach', 'gaster', 'ventriculus', 'стомах', 'стомашен'], modelId: 'stomach', region: 'Stomach' },
+  { syn: ['gallbladder', 'vesica biliaris', 'жлъчен мехур', 'жлъчка'], modelId: 'gallbladder', region: 'Gallbladder' },
+  { syn: ['bladder', 'urinary bladder', 'vesica urinaria', 'пикочен мехур'], modelId: 'bladder', region: 'Urinary bladder' },
+  { syn: ['esophagus', 'oesophagus', 'хранопровод'], modelId: 'esophagus', region: 'Esophagus' },
+  { syn: ['prostate', 'простата', 'простатна жлеза'], modelId: 'prostate', region: 'Prostate' },
+  { syn: ['trachea', 'трахея', 'дихателна тръба'], modelId: 'trachea', region: 'Trachea' },
+  { syn: ['thymus', 'тимус', 'млечна жлеза', 'гуша'], modelId: 'thymus', region: 'Thymus' },
+  { syn: ['adrenal', 'suprarenal', 'надбъбречна жлеза', 'надбъбречни жлези'], modelId: 'adrenals', region: 'Adrenal glands' },
+  { syn: ['small intestine', 'intestinum tenue', 'тънко черво'], modelId: 'small-intestine', region: 'Small intestine' },
+  { syn: ['large intestine', 'colon', 'intestinum crassum', 'дебело черво', 'колон'], modelId: 'large-intestine', region: 'Large intestine' },
 ];
 const REGION_TOKENS = REGIONS.map((r) => ({ ...r, synT: r.syn.map(synTokens) }));
 
@@ -94,6 +106,16 @@ const SYSTEMS: Array<{ system: string; syn: string[] }> = [
   { system: 'lungs', syn: ['lung', 'lungs', 'pulmonary', 'бял дроб', 'бели дробове'] },
   { system: 'kidneys', syn: ['kidney', 'kidneys', 'renal', 'бъбрек', 'бъбреци'] },
   { system: 'liver', syn: ['liver', 'hepatic', 'черен дроб', 'чернодробен'] },
+  { system: 'pancreas', syn: ['pancreas', 'pancreatic', 'панкреас'] },
+  { system: 'stomach', syn: ['stomach', 'gastric', 'стомах', 'стомашен'] },
+  { system: 'gallbladder', syn: ['gallbladder', 'biliary', 'жлъчен мехур', 'жлъчка'] },
+  { system: 'bladder', syn: ['bladder', 'vesical', 'пикочен мехур'] },
+  { system: 'esophagus', syn: ['esophagus', 'oesophagus', 'хранопровод'] },
+  { system: 'prostate', syn: ['prostate', 'prostatic', 'простата'] },
+  { system: 'trachea', syn: ['trachea', 'tracheal', 'трахея'] },
+  { system: 'thymus', syn: ['thymus', 'thymic', 'тимус'] },
+  { system: 'adrenals', syn: ['adrenal', 'suprarenal', 'надбъбречна', 'надбъбречни'] },
+  { system: 'intestine', syn: ['intestine', 'intestinal', 'bowel', 'черво', 'черва'] },
 ];
 const SYSTEM_TOKENS = SYSTEMS.map((s) => ({ ...s, synT: s.syn.map(synTokens) }));
 

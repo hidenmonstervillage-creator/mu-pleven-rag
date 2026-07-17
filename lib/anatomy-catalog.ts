@@ -298,6 +298,122 @@ export const ANATOMY_MODELS: AnatomyModelEntry[] = [
       { id: 'liver-l',   label: 'Left lobe',          groups: ['left lobe of liver'],   region: 'Liver', system: 'liver' },
     ],
   },
+  // ── Single/two-part BodyParts3D organs ────────────────────────────────────
+  // Each ships as one clean mesh (or two disjoint parts). Container concepts and
+  // pure-subset parts were dropped at build time to avoid coincident surfaces.
+  {
+    id: 'pancreas',
+    file: 'pancreas',
+    label: 'Pancreas',
+    bodyRegion: 'Abdominal organs',
+    topics: [
+      { id: 'panc-all', label: 'Pancreas — everything', groups: [],           whole: true, region: 'Pancreas' },
+      { id: 'panc-p',   label: 'Pancreas',              groups: ['pancreas'], region: 'Pancreas', system: 'pancreas' },
+    ],
+  },
+  {
+    id: 'stomach',
+    file: 'stomach',
+    label: 'Stomach',
+    bodyRegion: 'Abdominal organs',
+    topics: [
+      { id: 'stom-all', label: 'Stomach — everything', groups: [],          whole: true, region: 'Stomach' },
+      { id: 'stom-s',   label: 'Stomach',              groups: ['stomach'], region: 'Stomach', system: 'stomach' },
+    ],
+  },
+  {
+    id: 'gallbladder',
+    file: 'gallbladder',
+    label: 'Gallbladder',
+    bodyRegion: 'Abdominal organs',
+    topics: [
+      { id: 'gall-all', label: 'Gallbladder — everything', groups: [],              whole: true, region: 'Gallbladder' },
+      { id: 'gall-g',   label: 'Gallbladder',              groups: ['gallbladder'], region: 'Gallbladder', system: 'gallbladder' },
+    ],
+  },
+  {
+    id: 'bladder',
+    file: 'bladder',
+    label: 'Urinary bladder',
+    bodyRegion: 'Pelvic organs',
+    topics: [
+      { id: 'blad-all', label: 'Urinary bladder — everything', groups: [],                  whole: true, region: 'Urinary bladder' },
+      { id: 'blad-b',   label: 'Urinary bladder',              groups: ['urinary bladder'], region: 'Urinary bladder', system: 'bladder' },
+    ],
+  },
+  {
+    id: 'esophagus',
+    file: 'esophagus',
+    label: 'Esophagus',
+    bodyRegion: 'Thoracic organs',
+    topics: [
+      { id: 'esoph-all', label: 'Esophagus — everything', groups: [],            whole: true, region: 'Esophagus' },
+      { id: 'esoph-e',   label: 'Esophagus',              groups: ['esophagus'], region: 'Esophagus', system: 'esophagus' },
+    ],
+  },
+  {
+    id: 'prostate',
+    file: 'prostate',
+    label: 'Prostate',
+    bodyRegion: 'Pelvic organs',
+    topics: [
+      { id: 'pros-all', label: 'Prostate — everything', groups: [],           whole: true, region: 'Prostate' },
+      { id: 'pros-p',   label: 'Prostate',              groups: ['prostate'], region: 'Prostate', system: 'prostate' },
+    ],
+  },
+  {
+    id: 'trachea',
+    file: 'trachea',
+    label: 'Trachea',
+    bodyRegion: 'Thoracic organs',
+    topics: [
+      { id: 'trach-all', label: 'Trachea — everything', groups: [],          whole: true, region: 'Trachea' },
+      { id: 'trach-t',   label: 'Trachea',              groups: ['trachea'], region: 'Trachea', system: 'trachea' },
+    ],
+  },
+  {
+    // Lobes are disjoint and tile the organ exactly — the "thymus" container was dropped.
+    id: 'thymus',
+    file: 'thymus',
+    label: 'Thymus',
+    bodyRegion: 'Thoracic organs',
+    topics: [
+      { id: 'thym-all', label: 'Thymus — everything', groups: [],                        whole: true, region: 'Thymus' },
+      { id: 'thym-r',   label: 'Right lobe',          groups: ['right lobe of thymus'], region: 'Thymus', system: 'thymus' },
+      { id: 'thym-l',   label: 'Left lobe',           groups: ['left lobe of thymus'],  region: 'Thymus', system: 'thymus' },
+    ],
+  },
+  {
+    id: 'adrenals',
+    file: 'adrenals',
+    label: 'Adrenal glands',
+    bodyRegion: 'Abdominal organs',
+    topics: [
+      { id: 'adr-all', label: 'Adrenal glands — everything', groups: [],                       whole: true, region: 'Adrenal glands' },
+      { id: 'adr-r',   label: 'Right adrenal gland',         groups: ['right adrenal gland'], region: 'Adrenal glands', system: 'adrenals' },
+      { id: 'adr-l',   label: 'Left adrenal gland',          groups: ['left adrenal gland'],  region: 'Adrenal glands', system: 'adrenals' },
+    ],
+  },
+  {
+    id: 'small-intestine',
+    file: 'small-intestine',
+    label: 'Small intestine',
+    bodyRegion: 'Abdominal organs',
+    topics: [
+      { id: 'si-all', label: 'Small intestine — everything', groups: [],                  whole: true, region: 'Small intestine' },
+      { id: 'si-s',   label: 'Small intestine',              groups: ['small intestine'], region: 'Small intestine', system: 'intestine' },
+    ],
+  },
+  {
+    id: 'large-intestine',
+    file: 'large-intestine',
+    label: 'Large intestine',
+    bodyRegion: 'Abdominal organs',
+    topics: [
+      { id: 'li-all', label: 'Large intestine — everything', groups: [],                  whole: true, region: 'Large intestine' },
+      { id: 'li-l',   label: 'Large intestine',              groups: ['large intestine'], region: 'Large intestine', system: 'intestine' },
+    ],
+  },
 ];
 
 export function findModel(id: string): AnatomyModelEntry | undefined {
