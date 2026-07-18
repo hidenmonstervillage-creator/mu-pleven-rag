@@ -10,6 +10,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { AnatomyTopic, sanitizeName, cleanStructureName } from '@/lib/anatomy-catalog';
+import { ANATOMY_BG_LABELS } from '@/lib/anatomy-bg-labels';
 
 interface AnatomyViewerProps {
   open: boolean;
@@ -256,7 +257,13 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
         return;
       }
       const s = resolveStructure(hits[0].object);
-      setSelected(cleanStructureName(originalName.get(s) ?? s.name));
+      // Prefer the reviewed Bulgarian label. Map keys are the ORIGINAL
+      // (unsanitized) node names, e.g. "right atrium"; try that first, then the
+      // cleaned form (covers a runtime-sanitized "right_atrium" fallback), then
+      // fall back to the cleaned English name if nothing is mapped.
+      const raw = originalName.get(s) ?? s.name;
+      const cleaned = cleanStructureName(raw);
+      setSelected(ANATOMY_BG_LABELS[raw] ?? ANATOMY_BG_LABELS[cleaned] ?? cleaned);
       // Glow the SAME node the name resolves to, so outline ↔ label always agree.
       engineRef.current?.highlight(s);
     }
@@ -343,7 +350,7 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
           <span className="text-white" aria-hidden="true" style={{ fontSize: minimized ? 14 : 17 }}>🦴</span>
           <div className="flex flex-col min-w-0">
             <span className="text-white font-semibold leading-tight truncate" style={{ fontSize: minimized ? 12 : 14 }}>
-              {modelLabel}{topic && !topic.whole ? ` · ${topic.label}` : ''}
+              {ANATOMY_BG_LABELS[modelLabel] ?? modelLabel}{topic && !topic.whole ? ` · ${ANATOMY_BG_LABELS[topic.label] ?? topic.label}` : ''}
             </span>
             {!minimized && <span className="text-red-200 text-xs mt-0.5 truncate">{selected ? `Избрано: ${selected}` : status}</span>}
           </div>

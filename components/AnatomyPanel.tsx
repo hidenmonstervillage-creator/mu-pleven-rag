@@ -2,6 +2,10 @@
 
 import { useMemo, useState } from 'react';
 import { ANATOMY_MODELS, AnatomyModelEntry, AnatomyTopic } from '@/lib/anatomy-catalog';
+import { ANATOMY_BG_LABELS } from '@/lib/anatomy-bg-labels';
+
+// Reviewed Bulgarian display where available; otherwise the original string.
+const bg = (s: string): string => ANATOMY_BG_LABELS[s] ?? s;
 
 interface AnatomyPanelProps {
   facultyId: string;
@@ -132,7 +136,7 @@ export default function AnatomyPanel({ subject, activeTopicId, onOpenTopic }: An
                       className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-gray-50"
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-sm font-semibold text-gray-900">{model.label}</span>
+                        <span className="text-sm font-semibold text-gray-900">{bg(model.label)}</span>
                         <span className="text-[11px] text-gray-400">{model.bodyRegion} · {topics.length} теми</span>
                       </div>
                       <svg className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -143,7 +147,7 @@ export default function AnatomyPanel({ subject, activeTopicId, onOpenTopic }: An
                       <div className="border-t border-gray-100 px-2 py-2 space-y-2">
                         {Array.from(byRegion.entries()).map(([region, ts]: [string, AnatomyTopic[]]) => (
                           <div key={region}>
-                            <div className="text-[10px] uppercase tracking-wide text-gray-400 px-1.5 mb-1">{region}</div>
+                            <div className="text-[10px] uppercase tracking-wide text-gray-400 px-1.5 mb-1">{bg(region)}</div>
                             <div className="flex flex-wrap gap-1.5">
                               {ts.map((t) => (
                                 <button
@@ -156,9 +160,11 @@ export default function AnatomyPanel({ subject, activeTopicId, onOpenTopic }: An
                                         ? 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                                         : 'bg-white text-gray-700 border-gray-200 hover:border-slate-400 hover:text-slate-700'
                                   }`}
-                                  title={t.groups.length ? t.groups.join(', ') : 'цял модел'}
+                                  title={t.groups.length ? t.groups.map(bg).join(', ') : 'цял модел'}
                                 >
-                                  {t.system ? (t.system[0].toUpperCase() + t.system.slice(1)) : t.label}
+                                  {/* Prefer the reviewed Bulgarian topic label; else keep the
+                                      existing system-word / label behaviour. */}
+                                  {ANATOMY_BG_LABELS[t.label] ?? (t.system ? (t.system[0].toUpperCase() + t.system.slice(1)) : t.label)}
                                 </button>
                               ))}
                             </div>
