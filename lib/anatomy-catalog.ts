@@ -414,6 +414,29 @@ export const ANATOMY_MODELS: AnatomyModelEntry[] = [
       { id: 'li-l',   label: 'Large intestine',              groups: ['large intestine'], region: 'Large intestine', system: 'intestine' },
     ],
   },
+  {
+    // brachial-plexus.glb (AnatomyTOOL Open3DModel, CC BY-SA 4.0) — the classic
+    // plexus decomposition: Roots → Trunks → Divisions → Cords → Branches, plus
+    // context structures. Group names carry a "0 Nerves: …" ordering prefix;
+    // sanitizeName strips the colon → "0_Nerves_Roots" etc. (verified unique).
+    id: 'brachial-plexus',
+    file: 'brachial-plexus',
+    label: 'Brachial plexus',
+    bodyRegion: 'Limbs',
+    topics: [
+      { id: 'bplex-all',    label: 'Brachial plexus — everything', groups: [],                       whole: true, region: 'Brachial plexus' },
+      { id: 'bplex-roots',  label: 'Roots',      groups: ['0 Nerves: Roots'],     region: 'Brachial plexus', system: 'nerves' },
+      { id: 'bplex-trunks', label: 'Trunks',     groups: ['1 Nerves: Trunks'],    region: 'Brachial plexus', system: 'nerves' },
+      { id: 'bplex-div',    label: 'Divisions',  groups: ['2 Nerves: Divisions'], region: 'Brachial plexus', system: 'nerves' },
+      { id: 'bplex-cords',  label: 'Cords',      groups: ['3 Nerves: Cords'],     region: 'Brachial plexus', system: 'nerves' },
+      { id: 'bplex-branch', label: 'Branches',   groups: ['4 Nerves: Branches'],  region: 'Brachial plexus', system: 'nerves' },
+      { id: 'bplex-bones',  label: 'Bones',      groups: ['Bones'],               region: 'Brachial plexus', system: 'bones' },
+      { id: 'bplex-musc',   label: 'Muscles',    groups: ['Muscles'],             region: 'Brachial plexus', system: 'muscles' },
+      { id: 'bplex-art',    label: 'Arteries',   groups: ['Arteries'],            region: 'Brachial plexus', system: 'arteries' },
+      { id: 'bplex-lig',    label: 'Ligaments',  groups: ['Ligaments'],           region: 'Brachial plexus', system: 'ligaments' },
+      { id: 'bplex-cart',   label: 'Cartilages', groups: ['Cartilages'],          region: 'Brachial plexus', system: 'cartilages' },
+    ],
+  },
 ];
 
 export function findModel(id: string): AnatomyModelEntry | undefined {

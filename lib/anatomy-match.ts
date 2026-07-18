@@ -88,6 +88,7 @@ const REGIONS: RegionDef[] = [
   { syn: ['adrenal', 'suprarenal', 'надбъбречна жлеза', 'надбъбречни жлези'], modelId: 'adrenals', region: 'Adrenal glands' },
   { syn: ['small intestine', 'intestinum tenue', 'тънко черво'], modelId: 'small-intestine', region: 'Small intestine' },
   { syn: ['large intestine', 'colon', 'intestinum crassum', 'дебело черво', 'колон'], modelId: 'large-intestine', region: 'Large intestine' },
+  { syn: ['brachial plexus', 'plexus brachialis', 'brachial', 'раменен сплит', 'брахиален плексус', 'плексус брахиалис'], modelId: 'brachial-plexus', region: 'Brachial plexus' },
 ];
 const REGION_TOKENS = REGIONS.map((r) => ({ ...r, synT: r.syn.map(synTokens) }));
 

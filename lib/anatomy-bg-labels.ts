@@ -263,4 +263,18 @@ export const ANATOMY_BG_LABELS: Record<string, string> = {
   'ventricular system': 'вентрикуларна система',
   'Ventricular system': 'Вентрикуларна система',
   'Whole skeleton': 'Цял скелет',
+
+  // Brachial plexus stages (reviewed).
+  'Brachial plexus': 'Раменен сплит',
+  'Brachial plexus — everything': 'Раменен сплит — всичко',
+  'Roots': 'Корени',
+  'Trunks': 'Стволове',
+  'Divisions': 'Деления',
+  'Cords': 'Фасцикули',
+  'Branches': 'Клонове',
+  '0 Nerves: Roots': 'Корени',
+  '1 Nerves: Trunks': 'Стволове',
+  '2 Nerves: Divisions': 'Деления',
+  '3 Nerves: Cords': 'Фасцикули',
+  '4 Nerves: Branches': 'Клонове',
 };
