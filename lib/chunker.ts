@@ -21,47 +21,118 @@ function sanitizeText(text: string): string {
   return text.replace(/\x00/g, '').replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ').trim();
 }
 
-// Restore word spacing lost during pdfjs-dist extraction.
-// pdfjs-dist concatenates tokens without spaces in many PDFs, producing runs like
-// "RegionalAnatomy•Pelvis547". This step:
-//   1. Splits on bullet / middle-dot separator characters
-//   2. Inserts a space at lowercase→uppercase boundaries  (e.g. "RegionalAnatomy" → "Regional Anatomy")
-//   3. Inserts a space at letter↔digit boundaries          (e.g. "Pelvis547" → "Pelvis 547")
-//   4. Collapses any resulting runs of whitespace
+// Light post-processing for non-PDF paths (PPTX) where we still lack position data.
+// Replaces bullet chars and collapses whitespace.  Does NOT apply the camelCase/digit
+// heuristics — those were workarounds for the old flat-concat PDF extraction.
 function normalizeText(text: string): string {
   return text
-    // Common bullet / separator characters pdfjs-dist preserves literally
     .replace(/[•·‧∙◦▪▸◾‣⁃]/g, ' ')
-    // camelCase join: lowercase followed by uppercase → insert space
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    // Letter → digit boundary
-    .replace(/([A-Za-z])(\d)/g, '$1 $2')
-    // Digit → letter boundary
-    .replace(/(\d)([A-Za-z])/g, '$1 $2')
-    // Collapse whitespace
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-// Extract text from PDF using unpdf — no worker, safe for serverless/Vercel/Node.js
-export async function extractPdfPages(buffer: Buffer): Promise<PageText[]> {
-  const { extractText } = await import('unpdf');
+// ── Position-aware PDF text reconstruction ────────────────────────────────────
+//
+// unpdf's extractText (and the underlying getPageText) concatenates all text
+// items with no inter-item spaces, yielding runs like "RegionalAnatomyPelvis".
+// extractTextItems exposes {str, x, y, width, height, fontSize, hasEOL} per
+// item so we can infer word boundaries from glyph positions:
+//
+//   • Same line  (|Δy| < 0.5 × lineHeight) and a visible horizontal gap
+//     (x > prevRightEdge + threshold) → insert a space before the item.
+//   • Different line (|Δy| ≥ 0.5 × lineHeight) → insert a space so words
+//     from successive lines don't merge ("headingbody").
+//   • hasEOL flag → append a space after the item.
+//
+// threshold is tuned to ~15 % of the current font size.  Punctuation
+// (commas, periods) attached to a word has a near-zero gap and is NOT
+// separated — which is the correct behaviour.
 
-  const uint8Array = new Uint8Array(buffer);
-  const { text } = await extractText(uint8Array, { mergePages: false });
+interface RawTextItem {
+  str:        string;
+  x:          number;
+  y:          number;
+  width:      number;
+  height:     number;
+  fontSize:   number;
+  fontFamily: string;
+  dir:        string;
+  hasEOL:     boolean;
+}
 
-  if (Array.isArray(text)) {
-    return text
-      .map((pageText, index) => ({
-        page: index + 1,
-        text: normalizeText(sanitizeText(pageText ?? '')),
-      }))
-      .filter((p) => p.text.trim().length > 20);
+function reconstructPageText(items: RawTextItem[]): string {
+  if (items.length === 0) return '';
+
+  let result       = '';
+  let prevY        : number | null = null;
+  let prevRightEdge: number | null = null;
+  let prevFontSize : number | null = null;
+
+  for (const item of items) {
+    const { str, x, y, width, fontSize, hasEOL } = item;
+    if (!str) continue;
+
+    if (prevY === null) {
+      // Very first item — no predecessor to compare against
+      result += str;
+    } else {
+      const yDelta   = Math.abs(y - prevY);
+      const refSize  = prevFontSize ?? fontSize ?? 12;
+      const lineH    = Math.max(refSize, fontSize ?? 0, 1);
+
+      if (yDelta > lineH * 0.5) {
+        // Y moved by more than half a line → new text line; emit a space so
+        // "Chapter 1" on one line and "Introduction" on the next don't merge.
+        result += ' ';
+      } else {
+        // Same line: insert a space only when there is a visible gap.
+        const gap       = x - (prevRightEdge ?? x);
+        const threshold = (fontSize ?? refSize) * 0.15;
+        if (gap > threshold) {
+          result += ' ';
+        }
+      }
+
+      result += str;
+    }
+
+    // hasEOL signals an explicit end-of-line in the content stream.
+    if (hasEOL) result += ' ';
+
+    prevY         = y;
+    prevRightEdge = x + width;
+    prevFontSize  = fontSize || prevFontSize;
   }
 
-  // Fallback: single string (older unpdf versions or single-page PDFs)
-  const cleaned = normalizeText(sanitizeText(text as unknown as string));
-  return cleaned.trim().length > 20 ? [{ page: 1, text: cleaned }] : [];
+  return result
+    .replace(/[•·‧∙◦▪▸◾‣⁃]/g, ' ')   // bullet/separator chars → space
+    .replace(/\s+/g, ' ')              // collapse all whitespace
+    .trim();
+}
+
+// Extract text from PDF using unpdf's low-level extractTextItems API.
+// Each page's text items carry glyph positions, allowing reconstructPageText()
+// to insert spaces where the renderer would have rendered a visual gap.
+export async function extractPdfPages(buffer: Buffer): Promise<PageText[]> {
+  const { extractTextItems } = await import('unpdf');
+
+  const uint8Array = new Uint8Array(buffer);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { totalPages, items } = await extractTextItems(uint8Array) as {
+    totalPages: number;
+    items: RawTextItem[][];
+  };
+
+  const pages: PageText[] = [];
+  for (let i = 0; i < totalPages; i++) {
+    const pageItems = items[i] ?? [];
+    const raw       = reconstructPageText(pageItems);
+    const cleaned   = sanitizeText(raw);
+    if (cleaned.trim().length > 20) {
+      pages.push({ page: i + 1, text: cleaned });
+    }
+  }
+  return pages;
 }
 
 // Extract text from PPTX slide by slide using officeparser
