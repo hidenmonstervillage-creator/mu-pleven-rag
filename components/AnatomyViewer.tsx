@@ -9,6 +9,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { AnatomyTopic, sanitizeName, cleanStructureName } from '@/lib/anatomy-catalog';
 import { ANATOMY_BG_LABELS } from '@/lib/anatomy-bg-labels';
 
@@ -77,14 +78,32 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // ACES filmic rolloff. OutputPass (last in the composer chain) is what
+    // actually applies this — the composer bypasses the renderer's own final
+    // draw. Exposure compensates for ACES darkening the midtones.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
     mount.appendChild(renderer.domElement);
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
     renderer.domElement.style.display = 'block';
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 1.1));
-    const key = new THREE.DirectionalLight(0xffffff, 1.4); key.position.set(1, 2, 3); scene.add(key);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(-2, -1, -2); scene.add(fill);
+    // Image-based lighting. Without scene.environment, MeshStandardMaterial at
+    // metalness 0 gets no specular environment response and renders as matte
+    // plastic. That hits the smooth BodyParts3D organ meshes hardest — they
+    // have no high-frequency geometry to read by, so the environment is the
+    // only thing that can describe their surface. RoomEnvironment is procedural,
+    // so this costs no asset download.
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envRT = pmrem.fromScene(new RoomEnvironment(), 0.04);
+    scene.environment = envRT.texture;
+    scene.environmentIntensity = 0.55;
+
+    // Analytic lights dialled back — the env map now carries the ambient fill
+    // that HemisphereLight was approximating badly.
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 0.30));
+    const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(1, 2, 3); scene.add(key);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.45); fill.position.set(-2, -1, -2); scene.add(fill);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true; controls.dampingFactor = 0.08;
@@ -294,6 +313,10 @@ export default function AnatomyViewer({ open, modelFile, modelLabel, topic, init
           if (Array.isArray(mat)) mat.forEach((x) => x.dispose()); else mat?.dispose();
         }
       });
+      // Keyed on [modelFile]: without this, every model switch leaks a PMREM target.
+      scene.environment = null;
+      envRT.dispose();
+      pmrem.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
       engineRef.current = null;
