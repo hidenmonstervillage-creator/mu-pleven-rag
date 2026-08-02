@@ -158,30 +158,49 @@ ${context}`;
     { role: 'user', content: message },
   ];
 
-  const stream = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages,
-    stream: true,
-    temperature: 0.3,
-    max_tokens: 2000,
-  });
-
-  // Step 7: stream response with sources in the final chunk
+  // Step 7: stream response, sources FIRST
+  //
+  // The gpt-4o create() call used to be awaited here, before the ReadableStream was
+  // constructed — so the sources frame could not leave the server until the LLM
+  // connection was established. Measured cost: ~700-1000ms of dead air on every request
+  // (production TTFB 1956-2836ms vs first-text 1968-2845ms — they were the same moment).
+  // Opening the stream first and issuing the LLM call from inside start() lets the
+  // sources frame go out as soon as retrieval + rerank finish.
+  //
+  // Consequence that must be handled: the response headers are now already sent when the
+  // LLM call runs, so a throw can no longer become a 500. It has to be reported inside
+  // the stream instead. The NDJSON frame shapes are a client contract
+  // (components/ChatArea.tsx / app/page.tsx), so the failure is reported as a normal
+  // `text` frame followed by `done` rather than a new frame type.
   const encoder = new TextEncoder();
 
   const readableStream = new ReadableStream({
     async start(controller) {
-      // First send the sources as a JSON header chunk
+      // Sources go out immediately — before the LLM round trip.
       const sourcesPayload = JSON.stringify({ type: 'sources', sources }) + '\n';
       controller.enqueue(encoder.encode(sourcesPayload));
 
-      // Stream the text tokens
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content ?? '';
-        if (delta) {
-          const textPayload = JSON.stringify({ type: 'text', content: delta }) + '\n';
-          controller.enqueue(encoder.encode(textPayload));
+      try {
+        const stream = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages,
+          stream: true,
+          temperature: 0.3,
+          max_tokens: 2000,
+        });
+
+        // Stream the text tokens
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta?.content ?? '';
+          if (delta) {
+            const textPayload = JSON.stringify({ type: 'text', content: delta }) + '\n';
+            controller.enqueue(encoder.encode(textPayload));
+          }
         }
+      } catch (err) {
+        console.error('Generation failed after headers were sent:', err);
+        const msg = 'Възникна грешка при генерирането на отговора. Моля, опитайте отново.';
+        controller.enqueue(encoder.encode(JSON.stringify({ type: 'text', content: msg }) + '\n'));
       }
 
       // Signal end
