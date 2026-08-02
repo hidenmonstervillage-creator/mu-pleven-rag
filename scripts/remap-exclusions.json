@@ -1,0 +1,26 @@
+{
+ "_comment": [
+  "PERSISTENT remap exclusion list. Read by scripts/konspekt-remap-plan.mjs, which marks",
+  "any matching document status='EXCLUDED' BEFORE it proposes anything. That status is not",
+  "one of the auto-apply classes in konspekt-remap-autoapply.mjs, so an unattended run puts",
+  "these rows in 'held back' and can never re-file them.",
+  "",
+  "This exists because a document deliberately reverted to UNSORTED is indistinguishable,",
+  "to the planner, from one that was never filed — it would happily re-propose the exact",
+  "filing a human just undid. Match is by documentId first, folder second (documentId is",
+  "the surer key; folder survives a re-ingest that changes the id).",
+  "",
+  "To retire an entry: delete it. Do not add entries for rows that are merely uncertain —",
+  "uncertainty is already handled by the INVALID_TRIPLE / NO_METADATA hold classes."
+ ],
+ "excluded": [
+  {
+   "folder": "2013_Propedevtika_Iliev",
+   "documentId": "16361dde-ae6e-47e8-af88-04384bef2efb",
+   "excludedAt": "2026-08-01",
+   "revertedBy": "scripts/audit-fix-apply.mjs (audit wave 1)",
+   "reason": "Filed medicina/medicina/Клинична токсикология on a konspekt tie of MEDIUM 0.486. The inverse lookup — this book's own title against the 527 konspekt titles — scores 0.318, below the 0.45 MEDIUM floor, so the filing does not survive the reverse test. Deliberately returned to the UNSORTED placeholder; must stay there until a human assigns a subject.",
+   "keepUnsortedUntil": "a human assigns a subject"
+  }
+ ]
+}

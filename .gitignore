@@ -39,3 +39,18 @@ next-env.d.ts
 ocr-test/
 scratchpad/
 *.zip
+
+# throwaway scale-plan dry-run output
+scripts/scale-plan-output.json
+scripts/taxonomy-dump.txt
+scripts/scale-checkpoint.json
+scripts/konspekt-priority.json
+scripts/konspekt-match-output.json
+scripts/konspekt-match-all-output.json
+scripts/scale-skiplist.json
+scripts/konspekt-remap-plan.json
+scripts/bench/
+scripts/konspekt-remap-autoapply-report.json
+scripts/audit-fix-receipt.json
+scripts/audit-fix-2-receipt.json
+scripts/konspekt-remap-applied.json

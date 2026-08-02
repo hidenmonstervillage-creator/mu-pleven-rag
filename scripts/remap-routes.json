@@ -1,0 +1,91 @@
+{
+ "_comment": [
+  "PERSISTENT per-folder routing decisions, read by scripts/konspekt-remap-plan.mjs.",
+  "These are HUMAN decisions about individual books, not rules — which is exactly why they",
+  "live in data rather than in the planner's alias tables. A route wins over the hint map,",
+  "the subject aliases and the faculty overrides, and is still validated against",
+  "lib/faculties.ts like everything else (an unvalidatable route reports INVALID_TRIPLE).",
+  "",
+  "Why so many foz reroutes: the .docx colour legend (p3193-p3200) maps BLACK to",
+  "'ерготерапевти и кинезитерапевти'. Whoever built konspekt-priority.json collapsed that to",
+  "faculty_hint='foz', and the planner then defaulted bare 'foz' to foz/obshtestveno — health",
+  "management, which the legend never implies. The two specialties the colour actually means",
+  "are foz/kineziterapia and foz/рехабилитация.",
+  "",
+  "Decided 2026-08-01."
+ ],
+ "routes": [
+  {
+   "folder": "2017_Balneologiya",
+   "faculty_id": "foz", "specialty_id": "kineziterapia", "subject": "Физикална терапия",
+   "decidedAt": "2026-08-01",
+   "why": "konspekt_subject was 'Урология' (docx heading 'Физиотерапия и рехабилитация' was missed). Entry carries colour 000000 = кинезитерапевти. foz/kineziterapia already has Физикална терапия and Масаж."
+  },
+  {
+   "folder": "2006_Sportna_medicina_i_higiena",
+   "faculty_id": "foz", "specialty_id": "kineziterapia", "subject": "Спортна медицина",
+   "decidedAt": "2026-08-01",
+   "why": "colour 171717 (near-black) = кинезитерапевти; foz/kineziterapia already has 'Спортна медицина' verbatim."
+  },
+  {
+   "folder": "2011_Patofiziologiya_Stoinev",
+   "faculty_id": "foz", "specialty_id": "kineziterapia", "subject": "Патофизиология",
+   "decidedAt": "2026-08-01",
+   "why": "bare-foz entry; colour is 'auto' so the black inference is absence-of-evidence rather than evidence. Owner's decision: add Патофизиология to foz/kineziterapia, which already teaches 'Обща и специална патология'."
+  },
+  {
+   "folder": "2013_Farmakologiya_i_farmakoterapiya_za_ergoterapevti",
+   "faculty_id": "foz", "specialty_id": "рехабилитация", "subject": "Фармакология и фармакотерапия",
+   "decidedAt": "2026-08-01",
+   "why": "Strongest colour evidence in the set: pure 000000, and the title itself says 'за ерготерапевти'. foz/рехабилитация is the ergotherapy specialty."
+  },
+  {
+   "folder": "2012_Instrumentalni_metodi_v_klinichnat_laboratoriya",
+   "faculty_id": "fzg", "specialty_id": "laborant", "subject": "Клинична лаборатория",
+   "decidedAt": "2026-08-01",
+   "why": "Entry carries 7030A0 = мед. лаборанти alongside black; the foz hint is a derivation error. fzg/laborant already has 'Клинична лаборатория' verbatim."
+  },
+  {
+   "folder": "2006_Farmacevtichna_botanika_Gateva",
+   "faculty_id": "farmacia", "specialty_id": "farmacia", "subject": "Фармацевтична ботаника",
+   "decidedAt": "2026-08-01",
+   "why": "Entry carries FFC000 = Фармация alongside black; the foz hint is a derivation error. farmacia/farmacia already has 'Фармацевтична ботаника' verbatim."
+  },
+  {
+   "folder": "2015_Farmakologiya_Kuzmanova",
+   "faculty_id": "farmacia", "specialty_id": "farmacia", "subject": "Фармакология",
+   "decidedAt": "2026-08-01",
+   "why": "bare-foz entry, colour 'auto' only — no positive colour evidence either way. General pharmacology textbook; farmacia/farmacia already has 'Фармакология' verbatim."
+  },
+  {
+   "folder": "2015_Kineziterapiya_pri_nervni-i_psihichni_bolesti",
+   "faculty_id": "foz", "specialty_id": "kineziterapia", "subject": "Кинезитерапия при неврологични заболявания",
+   "decidedAt": "2026-08-01",
+   "why": "hint 'fzg' defaulted to fzg/sestra with subject 'Нервни болести', which fzg/sestra does not have. The book is kinesitherapy; foz/kineziterapia has this subject verbatim."
+  },
+  {
+   "folder": "2013_Obrabotka_na_obrazite_v_obraznata_diagnostika",
+   "faculty_id": "fzg", "specialty_id": "rentgenov", "subject": "Образна диагностика - обща част",
+   "decidedAt": "2026-08-01",
+   "why": "hint 'fvm' is wrong — this is general diagnostic-imaging processing, and fvm has no radiology subject at all. fzg/rentgenov has this subject verbatim."
+  },
+  {
+   "folder": "1980_Medicinska_biofizika",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Биофизика",
+   "decidedAt": "2026-08-01",
+   "why": "NO_METADATA row. Forward match MEDIUM 0.806 margin 0.302; inverse lookup of its own title scores 1.000 margin 0.370 against 'Медицинска биофизика' [Биофизика]. Both directions agree with wide margins."
+  },
+  {
+   "folder": "1981_Repetitorium_anatomicum",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Анатомия и хистология",
+   "decidedAt": "2026-08-01",
+   "why": "NO_METADATA row. Forward 0.920 margin 0.375; inverse 0.920 margin 0.120 against 'Repetitorium anatomicum' [Анатомия на човека]."
+  },
+  {
+   "folder": "1980_Atlas_of_human_histology",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Анатомия и хистология",
+   "decidedAt": "2026-08-01",
+   "why": "NO_METADATA row. Forward 0.800 margin 0.194; inverse 0.800 margin 0.417 against 'Atlas of human histology' [Анатомия и хистология на човека]."
+  }
+ ]
+}
