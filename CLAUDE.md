@@ -42,7 +42,8 @@ npm start        # run the production build
   - `scripts/bulk-reingest.mjs`, `scripts/full-reingest.mjs`, `scripts/local-reingest.mjs`, `scripts/test-extraction.mjs`
   - `STATE-REPORT.md`, `coverage-report.md`
 - **Commit only the specific files for the task at hand.** Never stage the in-flight files above. Use `git add <explicit paths>`, never `git add -A`/`.`.
-- **End every commit message with:** `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+- **End every commit message with:** `Co-Authored-By: Claude <noreply@anthropic.com>`
+  (no version number — it goes stale as models change; use whatever model actually authored it)
 - **Load-bearing files — edit deliberately, verify with a build:** `app/api/chat/route.ts` (tuned retrieval constants + NDJSON contract), `supabase/migrations/0016_match_chunks_exact.sql` (RPC signature is called from chat), `lib/faculties.ts` (taxonomy), `lib/embeddings.ts` + `app/api/ingest/route.ts` (chunk size/embedding model must stay consistent with stored data).
 - **Generated files — don't hand-edit:** `lib/anatomy-structures.ts` (regenerate via `scripts/gen-anatomy-structures.mjs`). `STATE-REPORT.md` / `coverage-report.md` are generated snapshots (and currently stale/in-flight).
 - **Two taxonomies** (`lib/faculties.ts` full, `lib/slides-faculties.ts` restricted) must stay consistent — a change in one usually needs the other.

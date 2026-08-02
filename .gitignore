@@ -53,3 +53,4 @@ scripts/bench/
 scripts/konspekt-remap-autoapply-report.json
 scripts/audit-fix-receipt.json
 scripts/audit-fix-2-receipt.json
+scripts/konspekt-remap-applied.json
