@@ -102,6 +102,15 @@ export const FACULTIES: Faculty[] = [
           'Фармакология',
           'Социална фармация и фармацевтично законодателство',
           'Клинична фармация',
+          // Added 2026-08-01 for library books that had no valid home under this specialty.
+          // Физика / Биофизика / Патофизиология reuse the medicina/medicina strings verbatim
+          // (same courses). "Хигиена и екология" deliberately does NOT reuse medicina's
+          // "Хигиена, екология и професионални заболявания" — pharmacy takes no occupational-
+          // disease component, and fzg/laborant and fzg/rentgenov already use this shorter name.
+          'Физика',
+          'Биофизика',
+          'Патофизиология',
+          'Хигиена и екология',
         ],
       },
     ],
@@ -113,19 +122,25 @@ export const FACULTIES: Faculty[] = [
       {
         id: 'veterinarna',
         name: 'Ветеринарна медицина',
+        // Subjects whose bare name is indistinguishable from the human-medicine course
+        // carry the "Ветеринарна" prefix. match_chunks keys on exact 3-way equality, so a
+        // shared string is a real cross-contamination risk, and a bare name in a picker
+        // reads as the human course. Names that already carry a species or veterinary
+        // signal ("на домашните животни", "на животните", "незаразни", "инвазионни") are
+        // left alone — prefixing them would only add noise.
         subjects: [
           'Анатомия на домашните животни',
-          'Цитология, хистология и ембриология',
+          'Ветеринарна цитология, хистология и ембриология',
           'Физика и биофизика',
-          'Биохимия',
+          'Ветеринарна биохимия',
           'Физиология на животните',
-          'Генетика',
-          'Микробиология',
-          'Патоанатомия',
-          'Патофизиология',
-          'Фармакология и токсикология',
+          'Ветеринарна генетика',
+          'Ветеринарна микробиология',
+          'Ветеринарна патоанатомия',
+          'Ветеринарна патофизиология',
+          'Ветеринарна фармакология и токсикология',
           'Паразитология и инвазионни болести',
-          'Хирургия',
+          'Ветеринарна хирургия',
           'Вътрешни незаразни болести',
           'Акушерство, репродукция и репродуктивни нарушения',
           'Хигиена, технология и контрол на храните',
@@ -236,6 +251,9 @@ export const FACULTIES: Faculty[] = [
           'Спортна медицина',
           'Масаж',
           'Физикална терапия',
+          // Added 2026-08-01. Distinct from the existing 'Обща и специална патология';
+          // string reused verbatim from medicina/medicina.
+          'Патофизиология',
         ],
       },
       {
@@ -250,6 +268,9 @@ export const FACULTIES: Faculty[] = [
           'Ерготерапия в детска възраст',
           'Кинезитерапия',
           'Психология и социална рехабилитация',
+          // Added 2026-08-01 for "Фармакология и фармакотерапия за ерготерапевти" (2013),
+          // whose .docx entry is pure black — the legend's ерготерапевти colour.
+          'Фармакология и фармакотерапия',
         ],
       },
       {
