@@ -86,6 +86,117 @@
    "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Анатомия и хистология",
    "decidedAt": "2026-08-01",
    "why": "NO_METADATA row. Forward 0.800 margin 0.194; inverse 0.800 margin 0.417 against 'Atlas of human histology' [Анатомия и хистология на човека]."
+  },
+
+  {
+   "_group": "B",
+   "_note": [
+    "The 16 books below carry NO usable konspekt evidence. The inverse lookup (each book's",
+    "own title against the 527 konspekt titles) returned 0 HIGH, 1 MEDIUM and 15 NONE, and",
+    "14 of 16 had a runner-up margin under 0.05. Eight scored 0.000 against every konspekt",
+    "title — they are 1968-1984 books and the konspekt is the CURRENT reading list, so they",
+    "are genuinely absent from it rather than mismatched.",
+    "",
+    "evidenceSource on each row records what the decision actually rests on:",
+    "  konspekt    — a real title match in konspekt-priority.json",
+    "  mixed       — weak konspekt signal corroborating a folder-name read",
+    "  folder-name — a human reading the folder name, and NOTHING else",
+    "Twelve of the sixteen are folder-name only. Treat them accordingly."
+   ],
+   "folder": "1976_Repititoium_anatomicum",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Анатомия и хистология",
+   "decidedAt": "2026-08-02", "evidenceSource": "konspekt", "confidence": "high",
+   "why": "konspekt has 'Repetitorium anatomicum' (1976), the same year. Scored only 0.380 because the FOLDER is misspelt 'Repititoium' vs 'Repetitorium'. Its 1981 sibling was filed to this subject at 0.92."
+  },
+  {
+   "folder": "1982_Obshta_histologiya_i_embriologiya",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Цитология",
+   "decidedAt": "2026-08-02", "evidenceSource": "konspekt", "confidence": "high",
+   "why": "MEDIUM 0.570 with dist=Y. Margin is 0.000 only because three konspekt rows tie — and all three carry the SAME konspekt_subject, so the subject is safe even though the specific entry is not."
+  },
+  {
+   "folder": "1977_Atlas_of_deskriptive_histology",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Анатомия и хистология",
+   "decidedAt": "2026-08-02", "evidenceSource": "mixed", "confidence": "medium",
+   "why": "Top two konspekt candidates (0.261 'Atlas of human histology', 0.217 'Histology') are both histology atlases under this subject, but the margin is only 0.044."
+  },
+  {
+   "folder": "1975_Embriologiya_na_choveka",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Цитология",
+   "decidedAt": "2026-08-02", "evidenceSource": "mixed", "confidence": "medium",
+   "why": "Human embryology. Top hit (0.328) is an anatomy dissection guide and wrong, but the runner-ups at 0.111 carry dist=Y and are the Цитология/обща хистология/ембриология course."
+  },
+  {
+   "folder": "1978_Rentgenova_tehnika",
+   "faculty_id": "fzg", "specialty_id": "rentgenov", "subject": "Рентгенова техника",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "high",
+   "why": "Scored 0.000 against every konspekt title. Filed because the folder name is an EXACT match for the existing fzg/rentgenov subject string 'Рентгенова техника'."
+  },
+  {
+   "folder": "1972_Anatomii_1cheloveka",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Анатомия и хистология",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "high",
+   "why": "Scored 0.000 against every konspekt title. Russian 'Анатомия человека', volume 1 — the transliterated folder name is the only evidence."
+  },
+  {
+   "folder": "1973_Anatomii_2cheloveka",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Анатомия и хистология",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "high",
+   "why": "Scored 0.000 against every konspekt title. Same work as 1972_Anatomii_1cheloveka, volume 2."
+  },
+  {
+   "folder": "1984_Fizioterapiya_Nikolova",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Физиотерапия и рехабилитация",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "high",
+   "why": "Scored 0.000 against every konspekt title. Physiotherapy monograph; same cluster as the four books refiled to this subject in audit wave 1."
+  },
+  {
+   "folder": "1982_Klinichna_akushero_ginekologichna_endokrinologiya",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Акушерство и гинекология",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "high",
+   "why": "Scored 0.000 against every konspekt title. Folder reads 'клинична акушеро-гинекологична ендокринология'."
+  },
+  {
+   "folder": "1975_Rakovodstvo_za_razpoznavane_na_celi_i_nariyazani_drogi",
+   "faculty_id": "farmacia", "specialty_id": "farmacia", "subject": "Фармакогнозия",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "high",
+   "why": "Best konspekt score 0.184 with a 0.004 margin — noise. Filed on the folder name: recognising whole and cut crude drugs is pharmacognosy."
+  },
+  {
+   "folder": "1968_Nevrotravmi",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Неврохирургия",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "medium",
+   "why": "Scored 0.000 against every konspekt title. 'Невротравми' = neurotrauma; could also sit under Нервни болести."
+  },
+  {
+   "folder": "1981_Hirurgichno_lechenie_na_sadovite_zaboliyavaniya_na_mozaka",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Неврохирургия",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "medium",
+   "why": "Scored 0.000 against every konspekt title. Surgical treatment of cerebral vascular disease."
+  },
+  {
+   "folder": "1983_Klapni_poroci_na_sarceto",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Кардиология",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "medium",
+   "why": "Scored 0.000 against every konspekt title. 'Клапни пороци на сърцето' = valvular heart disease; Кардиохирургия is the alternative reading."
+  },
+  {
+   "folder": "1984_Psihologichno_izsledvane_na_lichnostta_v_klinichnata_praktika",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Медицинска психология",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "medium",
+   "why": "Scored 0.000 against every konspekt title. Personality assessment in clinical practice."
+  },
+  {
+   "folder": "1978_Rakovodstvo_za_laboratorn-_uprajneniya_po_opitna_fizika",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Физика",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "medium",
+   "why": "Best konspekt score 0.077 with a 0.011 margin — noise. Lab manual for experimental physics."
+  },
+  {
+   "folder": "1984_Oxford_general_practice_the_consultation",
+   "faculty_id": "medicina", "specialty_id": "medicina", "subject": "Обща медицина",
+   "decidedAt": "2026-08-02", "evidenceSource": "folder-name", "confidence": "low",
+   "why": "Scored 0.000 against every konspekt title. Oxford General Practice series — but 'the consultation' means it could equally be a communication-skills text. Lowest-confidence row in this batch."
   }
  ]
 }
