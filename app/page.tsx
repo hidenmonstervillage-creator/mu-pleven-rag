@@ -13,6 +13,7 @@ import AnatomySuggest from '@/components/AnatomySuggest';
 import AnatomyViewer from '@/components/AnatomyViewer';
 import { AnatomyModelEntry, AnatomyTopic } from '@/lib/anatomy-catalog';
 import { ChatMessage, ConversationHistory, SourceChunk } from '@/lib/types';
+import { docsForSubject } from '@/lib/subject-coverage';
 
 // Persist conversation to localStorage
 function saveConversation(conv: ConversationHistory) {
@@ -74,7 +75,14 @@ export default function HomePage() {
     setMessages(conv.messages);
     setFacultyId(conv.facultyId);
     setSpecialtyId(conv.specialtyId);
-    setSubject(conv.subject);
+    // A conversation saved before a taxonomy change (or before coverage was
+    // enforced) can name a subject that now has no literature. Restoring it would
+    // drop the user into a dead state whose only possible answer is the
+    // zero-coverage notice, with the picker showing it as greyed out. Clear it and
+    // let them pick a covered subject instead.
+    const stillCovered =
+      docsForSubject(conv.facultyId, conv.specialtyId, conv.subject) > 0;
+    setSubject(stillCovered ? conv.subject : '');
   }, []);
 
   const sendMessage = useCallback(async () => {

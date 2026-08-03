@@ -4,6 +4,18 @@ import { FACULTIES } from '@/lib/faculties';
 import { Faculty, Specialty } from '@/lib/types';
 import SubjectCombobox from '@/components/SubjectCombobox';
 import Logo from '@/components/Logo';
+import {
+  docsForFaculty,
+  docsForSpecialty,
+  docsForSubject,
+  docsLabel,
+} from '@/lib/subject-coverage';
+
+// Only 74 of 396 taxonomy triples have any literature — the reading list simply
+// names no books for the rest. Offering all 396 identically made the empty ones
+// look broken (you ask, you get a refusal and no source cards). Coverage is a
+// build-time snapshot (lib/subject-coverage.ts), so this costs no page-load query.
+const EMPTY_BADGE = 'без налична литература';
 
 interface TopBarProps {
   facultyId: string;
@@ -56,18 +68,22 @@ export default function TopBar({
 
       {/* Cascading dropdowns */}
       <div className="flex items-center gap-2 flex-wrap">
-        {/* Faculty */}
+        {/* Faculty — an entirely empty faculty (mk: 0 docs across all 58 subjects)
+            is disabled here rather than three clicks deep. */}
         <select
           value={facultyId}
           onChange={(e) => handleFacultyChange(e.target.value)}
           className={selectClass}
         >
           <option value="">— Факултет —</option>
-          {FACULTIES.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name}
-            </option>
-          ))}
+          {FACULTIES.map((f) => {
+            const docs = docsForFaculty(f.id);
+            return (
+              <option key={f.id} value={f.id} disabled={docs === 0}>
+                {docs > 0 ? `${f.name} · ${docsLabel(docs)}` : `${f.name} — ${EMPTY_BADGE}`}
+              </option>
+            );
+          })}
         </select>
 
         {/* Specialty */}
@@ -78,24 +94,38 @@ export default function TopBar({
           className={selectClass}
         >
           <option value="">— Специалност —</option>
-          {selectedFaculty?.specialties.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
+          {selectedFaculty?.specialties.map((s) => {
+            const docs = docsForSpecialty(selectedFaculty.id, s.id);
+            return (
+              <option key={s.id} value={s.id} disabled={docs === 0}>
+                {docs > 0 ? `${s.name} · ${docsLabel(docs)}` : `${s.name} — ${EMPTY_BADGE}`}
+              </option>
+            );
+          })}
         </select>
 
-        {/* Subject — searchable combobox (type to filter) */}
+        {/* Subject — searchable combobox (type to filter). Counts come from the
+            FULL triple: subject names are not unique across faculties. */}
         <div className="w-[220px]">
           <SubjectCombobox
             subjects={selectedSpecialty?.subjects ?? []}
             value={subject}
             disabled={!selectedSpecialty || selectedSpecialty.subjects.length === 0}
             placeholder="— Предмет —"
+            getDocs={(s) =>
+              selectedFaculty && selectedSpecialty
+                ? docsForSubject(selectedFaculty.id, selectedSpecialty.id, s)
+                : 0
+            }
             onChange={(v) => {
               // Only commit a real subject — ignore partial typing so the cascade
               // (chat, slide panel, auto-suggest) never sees an invalid value.
-              if ((selectedSpecialty?.subjects ?? []).includes(v)) onSubjectChange(v);
+              // Also refuse subjects with no literature, so typing an empty one's
+              // full name can't bypass the greyed-out list entry.
+              if (!(selectedSpecialty?.subjects ?? []).includes(v)) return;
+              if (!selectedFaculty || !selectedSpecialty) return;
+              if (docsForSubject(selectedFaculty.id, selectedSpecialty.id, v) === 0) return;
+              onSubjectChange(v);
             }}
           />
         </div>

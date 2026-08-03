@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { createServiceClient } from '@/lib/supabase';
 import { embedText } from '@/lib/embeddings';
 import { ChatRequest, SourceChunk } from '@/lib/types';
+import { docsForSubject } from '@/lib/subject-coverage';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -17,6 +18,44 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: 'Missing required fields' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Step 0: zero-coverage short-circuit.
+  //
+  // Only 74 of 396 taxonomy triples have any literature. For the other 322 the
+  // retrieval path cannot succeed, so we used to hand gpt-4o an empty context and
+  // let the system prompt force a refusal — which meant the model PHRASED the
+  // refusal itself and the wording drifted between runs. Answer deterministically
+  // instead, and skip the embedding + match_chunks + generation round trips
+  // entirely (~4-6s saved on a query that could never work).
+  //
+  // Coverage is the build-time snapshot in lib/subject-coverage.ts, keyed on the
+  // full triple — subject names are not unique across faculties.
+  //
+  // This still has to speak the NDJSON frame contract that app/page.tsx and
+  // components/ChatArea.tsx read: sources, then text, then done. Returning plain
+  // JSON here would hang the client's stream reader.
+  if (docsForSubject(facultyId, specialtyId, subject) === 0) {
+    const notice =
+      'Системата съдържа литературата от официалния конспект за дигитализация ' +
+      `на МУ-Плевен. За «${subject}» няма индексирани материали.`;
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(JSON.stringify({ type: 'sources', sources: [] }) + '\n'));
+        controller.enqueue(encoder.encode(JSON.stringify({ type: 'text', content: notice }) + '\n'));
+        controller.enqueue(encoder.encode(JSON.stringify({ type: 'done' }) + '\n'));
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'application/x-ndjson',
+        'Cache-Control': 'no-cache',
+      },
     });
   }
 
