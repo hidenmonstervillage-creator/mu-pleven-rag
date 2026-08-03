@@ -73,15 +73,24 @@ if (COMPARE) {
   const [a, b] = COMPARE;
   const A = JSON.parse(readFileSync(resolve(OUTDIR, `${a}.json`), 'utf8'));
   const B = JSON.parse(readFileSync(resolve(OUTDIR, `${b}.json`), 'utf8'));
-  const byS = (r) => Object.fromEntries(r.results.map((x) => [x.subject, x]));
+  // Key on the FULL triple. Subject alone collapses duplicates that exist under several
+  // faculties (Патофизиология in medicina/farmacia/foz, Микробиология in medicina/fzg,
+  // Физика, Биохимия, Фармакология, ...), which would silently pair the wrong rows.
+  const key = (x) => `${x.faculty ?? '?'}/${x.specialty ?? '?'}/${x.subject}`;
+  const byS = (r) => Object.fromEntries(r.results.map((x) => [key(x), x]));
   const ra = byS(A), rb = byS(B);
-  console.log(`\ncomparing "${a}" → "${b}"\n`);
-  console.log('subject                     chunks   cold(ms)         p50(ms)          p95(ms)        rows');
-  for (const s of Object.keys(ra)) {
-    const x = ra[s], y = rb[s]; if (!y) continue;
+  const missing = Object.keys(ra).filter((k) => !rb[k]);
+  console.log(`\ncomparing "${a}" → "${b}"   (${Object.keys(ra).length} vs ${Object.keys(rb).length} subjects` +
+    `${missing.length ? `, ${missing.length} not in ${b}` : ''})\n`);
+  console.log('subject                                   chunks   cold(ms)         p50(ms)          p95(ms)        rows');
+  const rows = Object.keys(ra).filter((k) => rb[k])
+    .sort((m, n) => (rb[n].p95 ?? 0) - (rb[m].p95 ?? 0));
+  for (const s of rows) {
+    const x = ra[s], y = rb[s];
     const d = (u, v) => `${String(u).padStart(5)}→${String(v).padStart(5)} ${v <= u ? `(-${(100 * (u - v) / (u || 1)).toFixed(0)}%)` : `(+${(100 * (v - u) / (u || 1)).toFixed(0)}%)`}`;
-    console.log(`${s.padEnd(26)} ${String(x.chunks).padStart(6)}  ${d(x.cold, y.cold)}  ${d(x.p50, y.p50)}  ${d(x.p95, y.p95)}  ${x.rows}→${y.rows}`);
+    console.log(`${s.slice(0, 40).padEnd(41)} ${String(x.chunks).padStart(6)}  ${d(x.cold, y.cold)}  ${d(x.p50, y.p50)}  ${d(x.p95, y.p95)}  ${x.rows}→${y.rows}`);
   }
+  if (missing.length) { console.log(`\nnot present in "${b}":`); missing.forEach((m) => console.log(`  ${m}`)); }
   const errA = A.results.filter((r) => r.errors).length, errB = B.results.filter((r) => r.errors).length;
   console.log(`\nsubjects with errors: ${a}=${errA}  ${b}=${errB}`);
   process.exit(0);
