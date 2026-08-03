@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { ChatMessage } from '@/lib/types';
+import { ChatMessage, SourceChunk } from '@/lib/types';
 import SourceCard from './SourceCard';
 import { PDFViewerPayload } from './PDFViewer';
 import Logo from './Logo';
@@ -11,6 +11,10 @@ interface ChatAreaProps {
   messages: ChatMessage[];
   isLoading: boolean;
   streamingContent: string;
+  // Sources arrive in the FIRST NDJSON frame, ~400ms before the first text token
+  // (the route sends them before the gpt-4o round trip). Rendering them while the
+  // answer is still streaming is the whole point of that change.
+  streamingSources: SourceChunk[];
   onOpenPdf: (payload: PDFViewerPayload) => void;
 }
 
@@ -44,7 +48,7 @@ function WelcomeScreen() {
   );
 }
 
-export default function ChatArea({ messages, isLoading, streamingContent, onOpenPdf }: ChatAreaProps) {
+export default function ChatArea({ messages, isLoading, streamingContent, streamingSources, onOpenPdf }: ChatAreaProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -101,6 +105,21 @@ export default function ChatArea({ messages, isLoading, streamingContent, onOpen
                     <span className="w-2 h-2 bg-[#7B1C1C] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                     <span className="w-2 h-2 bg-[#7B1C1C] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                     <span className="w-2 h-2 bg-[#7B1C1C] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Source cards render as soon as the sources frame lands — before the
+                  first text token, not after the stream closes. */}
+              {streamingSources.length > 0 && (
+                <div className="flex flex-col gap-2 w-full">
+                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">
+                    Използвани източници
+                  </p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {streamingSources.map((src) => (
+                      <SourceCard key={src.id} source={src} onOpen={onOpenPdf} />
+                    ))}
                   </div>
                 </div>
               )}

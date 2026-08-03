@@ -42,6 +42,9 @@ export default function HomePage() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  // Sources arrive in the first NDJSON frame, ahead of the first text token. Held in
+  // state so the cards can render while the answer is still streaming.
+  const [streamingSources, setStreamingSources] = useState<SourceChunk[]>([]);
   const [pdfViewerPayload, setPdfViewerPayload] = useState<PDFViewerPayload | null>(null);
   const [askedQuestion, setAskedQuestion] = useState('');
   const [askNonce, setAskNonce] = useState(0);
@@ -63,6 +66,7 @@ export default function HomePage() {
     setMessages([]);
     setInputValue('');
     setStreamingContent('');
+    setStreamingSources([]);
   }, []);
 
   const loadConversation = useCallback((conv: ConversationHistory) => {
@@ -94,6 +98,7 @@ export default function HomePage() {
     setInputValue('');
     setIsLoading(true);
     setStreamingContent('');
+    setStreamingSources([]);
 
     // Feed the question to the slide auto-suggest (re-triggers on every send).
     setAskedQuestion(text);
@@ -139,6 +144,7 @@ export default function HomePage() {
 
           if (parsed.type === 'sources' && parsed.sources) {
             sources = parsed.sources;
+            setStreamingSources(parsed.sources);
           } else if (parsed.type === 'text' && parsed.content) {
             fullText += parsed.content;
             setStreamingContent(fullText);
@@ -157,6 +163,7 @@ export default function HomePage() {
       const finalMessages = [...updatedMessages, assistantMessage];
       setMessages(finalMessages);
       setStreamingContent('');
+      setStreamingSources([]);
 
       // Persist to localStorage
       const convId = conversationId ?? uuidv4();
@@ -183,6 +190,7 @@ export default function HomePage() {
       };
       setMessages((prev) => [...prev, errorMessage]);
       setStreamingContent('');
+      setStreamingSources([]);
     } finally {
       setIsLoading(false);
     }
@@ -210,6 +218,7 @@ export default function HomePage() {
           messages={messages}
           isLoading={isLoading}
           streamingContent={streamingContent}
+          streamingSources={streamingSources}
           onOpenPdf={handleOpenPdf}
         />
 
