@@ -63,9 +63,18 @@ const FACULTY_MAP = {
   // propose 'sestra' (largest cohort, shares the core curriculum) but flag it.
   fzg:           { fid: 'fzg',      sid: 'sestra',      ambiguous: true,
                    note: "bare 'fzg' — сестра vs акушерка (and 3 more) share these subjects; proposing sestra" },
-  // 'foz' has 8 specialties; общественото здраве is the general one.
-  foz:           { fid: 'foz',      sid: 'obshtestveno', ambiguous: true,
-                   note: "bare 'foz' — 8 specialties; proposing obshtestveno (general public health)" },
+  // Bare 'foz' does NOT mean "one of foz's 8 specialties". It is derived from the .docx
+  // colour legend (p3193-p3200), where BLACK = "ерготерапевти и кинезитерапевти" — i.e.
+  // foz/kineziterapia and foz/рехабилитация, and nothing else. obshtestveno (health
+  // management) is never implied by that colour; proposing it sent every bare-foz book to
+  // a specialty that does not teach the subject, producing INVALID_TRIPLE every time
+  // (Фармакология x3, Патофизиология, Клинична лаборатория, Хигиена, Урология).
+  // Ambiguity here is 2-way, not 8-way. kineziterapia is the larger of the two and
+  // carries the general courses (Анатомия, Физиология, Спортна медицина, Физикална
+  // терапия, Масаж); рехабилитация is ergotherapy-specific, so a title naming
+  // ерготерапия/ерготерапевти belongs there instead — see scripts/remap-routes.json.
+  foz:           { fid: 'foz',      sid: 'kineziterapia', ambiguous: true,
+                   note: "bare 'foz' — legend colour black = ерготерапевти и кинезитерапевти; proposing kineziterapia, but check for an ergotherapy title which belongs under рехабилитация" },
 };
 
 // ── konspekt_subject → taxonomy subject aliases ────────────────────────────────

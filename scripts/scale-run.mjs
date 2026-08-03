@@ -34,6 +34,8 @@ const LIMIT = 4;   // per-session cap, counted in NEW books (completed + skiplis
                    // VPN-drop casualties from the previous session.
 const MIN_FREE_GB = 12;
 const COMPRESS_OVER_MB = 50;   // CLAUDE.md runbook: recompress before upload
+const UPLOAD_ATTEMPTS = 3;     // retries when the upload returns 2xx with a non-JSON body
+const UPLOAD_RETRY_MS = 4000;  // linear backoff: 4s, 8s
 const OCR_TIMEOUT_MS = 150 * 60000;  // kill a wedged ocrmypdf (sleep/hibernation) after 150 min
 
 const TESS = 'C:\\Users\\MIsho\\AppData\\Local\\Temp\\claude\\C--Users-MIsho-DKC-1-AI-reception-CRM\\23052c26-346a-4dd7-a92b-fc4f265cb37d\\scratchpad\\tessdata';
@@ -338,7 +340,39 @@ for (let i = 0; i < ready.length; i++) {
       return { ok: r.ok, status: r.status, r };
     };
 
-    let up = await postFile(upload);
+    // A 2xx response whose body is an nginx/proxy HTML error page used to reach
+    // `await up.r.json()` and throw "SyntaxError: Unexpected token '<', \"<!DOCTYPE \"",
+    // which killed the book outright — 1992_Anatomy and physiology died this way after a
+    // full download + ~45 min OCR. Check the content type, and treat a non-JSON body as a
+    // TRANSIENT upload failure worth retrying rather than a fatal one.
+    const postFileChecked = async (file, what) => {
+      let last = null;
+      for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt++) {
+        const res = await postFile(file);
+        if (!res.ok) {                       // real HTTP status error (413 etc.) — caller decides
+          const raw = await res.r.text().catch(() => '');
+          return { ...res, body: null, raw };
+        }
+        const ct = (res.r.headers.get('content-type') || '').toLowerCase();
+        const raw = await res.r.text();
+        const looksJson = ct.includes('application/json') || /^\s*[{[]/.test(raw);
+        if (looksJson) {
+          try {
+            const json = JSON.parse(raw);
+            if (json && json.url) return { ...res, body: json, raw };
+            last = { why: 'JSON without a url field', ct, raw };
+          } catch (e) { last = { why: `JSON parse failed: ${e.message}`, ct, raw }; }
+        } else {
+          last = { why: 'non-JSON body on a 2xx response (proxy/nginx error page?)', ct: ct || '(none)', raw };
+        }
+        console.log(`${tag} ${folder} — ${what} attempt ${attempt}/${UPLOAD_ATTEMPTS} unusable: ${last.why}` +
+          ` [content-type: ${last.ct}] first 120 chars: ${last.raw.replace(/\s+/g, ' ').slice(0, 120)}`);
+        if (attempt < UPLOAD_ATTEMPTS) await new Promise((r) => setTimeout(r, UPLOAD_RETRY_MS * attempt));
+      }
+      return { ok: false, status: 0, r: null, body: null, raw: last?.raw ?? '', nonJson: true, why: last?.why };
+    };
+
+    let up = await postFileChecked(upload, 'upload');
     let usedScreenFallback = false;
 
     // ── 413 FALLBACK ─────────────────────────────────────────────────────────
@@ -361,14 +395,22 @@ for (let i = 0; i < ready.length; i++) {
         } else {
           console.log(`${tag} ${folder} — /screen OK: ${MB(before)}MB → ${MB(statSync(screenFile).size)}MB, ` +
             `${v.pages}pp, text ${baseline.alpha}→${v.alpha} chars (cyrillic ${v.cyr}); retrying upload`);
-          up = await postFile(screenFile);
+          up = await postFileChecked(screenFile, 'upload(/screen)');
           if (up.ok) { upload = screenFile; usedScreenFallback = true; }
         }
       }
     }
 
     if (!up.ok) {
-      const t = await up.r.text();
+      const t = up.raw ?? '';
+      if (up.nonJson) {
+        // Deliberately NOT skiplisted: the OCR output is fine and the endpoint was
+        // misbehaving, so this book should be retried in a later session rather than
+        // permanently excluded.
+        failed.push({ folder, reason: `upload returned a non-JSON body after ${UPLOAD_ATTEMPTS} attempts: ${up.why}` });
+        console.log(`${tag} ${folder} → FAILED upload: ${up.why} (retried ${UPLOAD_ATTEMPTS}x, NOT skiplisted — retry next session)`);
+        continue;
+      }
       failed.push({ folder, reason: `upload HTTP ${up.status}: ${t.slice(0, 150)}` });
       if (up.status === 413) {
         // still too large even at 72dpi — genuinely needs the nginx limit raised
@@ -379,14 +421,28 @@ for (let i = 0; i < ready.length; i++) {
       }
       continue;
     }
-    const { url: storageUrl } = await up.r.json();
+    const storageUrl = up.body.url;
 
     // 7. ingest via the existing route
     const ing = await fetch('http://localhost:3000/api/ingest', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ storageUrl, filename, facultyId, specialtyId, subject, fileType: 'textbook' }),
     });
-    const ingJson = await ing.json();
+    // Same content-type guard as the upload. NOT retried, deliberately: /api/ingest is not
+    // idempotent, so a blind retry on an ambiguous response risks a duplicate document.
+    // reconcileFromDB() below already recovers a document that ingested but whose response
+    // we failed to read, so failing loudly here is the safe direction.
+    const ingCt = (ing.headers.get('content-type') || '').toLowerCase();
+    const ingRaw = await ing.text();
+    let ingJson = null;
+    if (ingCt.includes('application/json') || /^\s*[{[]/.test(ingRaw)) {
+      try { ingJson = JSON.parse(ingRaw); } catch { /* handled below */ }
+    }
+    if (!ingJson) {
+      failed.push({ folder, reason: `ingest returned a non-JSON body [${ingCt || 'no content-type'}]: ${ingRaw.replace(/\s+/g, ' ').slice(0, 150)}` });
+      console.log(`${tag} ${folder} → FAILED ingest: non-JSON response [${ingCt || 'no content-type'}] — ${ingRaw.replace(/\s+/g, ' ').slice(0, 120)}`);
+      continue;
+    }
     if (!ing.ok || !ingJson.success) { failed.push({ folder, reason: `ingest: ${ingJson.error ?? ing.status}` }); console.log(`${tag} ${folder} → FAILED ingest: ${ingJson.error ?? ing.status}`); continue; }
     const { documentId, chunksCreated } = ingJson;
 
