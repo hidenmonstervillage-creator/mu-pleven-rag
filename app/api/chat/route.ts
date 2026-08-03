@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase';
 import { embedText } from '@/lib/embeddings';
 import { ChatRequest, SourceChunk } from '@/lib/types';
 import { docsForSubject } from '@/lib/subject-coverage';
+import { filterTocChunks } from '@/lib/toc-filter';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -89,9 +90,44 @@ export async function POST(req: NextRequest) {
     (c) => (c.similarity ?? 0) >= 0.2
   );
 
+  // Step 2a-bis: drop contents/index pages BEFORE dedupe and rerank.
+  //
+  // ~4.6% of the corpus is front/back matter that was chunked and embedded like
+  // body text. A contents page literally IS a list of the type names, so for
+  // "какви са видовете X" it both scores high on cosine similarity and reads as
+  // maximally relevant to the gpt-4o-mini reranker — while explaining nothing.
+  // Measured: „какви са видовете химични връзки" retrieved 3 genuine prose chunks
+  // at ranks 3/5/6 and the reranker discarded all three in favour of two contents
+  // pages, which became the citations.
+  //
+  // Filtering here (not after top-5) matters: the top-5 then backfills with prose
+  // instead of shrinking. See lib/toc-filter.ts for the precision-first detector
+  // and the >=3 safety floor.
+  const tocFiltered = filterTocChunks(
+    aboveThreshold,
+    (c) => c.content,
+    (c) => c.similarity ?? 0,
+    3,
+  );
+  for (const r of tocFiltered.removed) {
+    console.log(
+      `[chat] dropped contents/index chunk: subject=${JSON.stringify(subject)} ` +
+      `doc=${JSON.stringify(r.item.clean_title)} page=${r.item.page_number} ` +
+      `sim=${(r.item.similarity ?? 0).toFixed(4)} score=${r.verdict.score} ` +
+      `reasons=[${r.verdict.reasons.join('; ')}]`,
+    );
+  }
+  if (tocFiltered.floorEngaged) {
+    console.warn(
+      `[chat] TOC filter hit the safety floor for subject=${JSON.stringify(subject)} — ` +
+      'restored highest-similarity contents chunks to keep >=3 candidates',
+    );
+  }
+  const contentChunks = tocFiltered.kept;
+
   // Step 2b: deduplicate by document — keep max 2 highest-scoring chunks per document
   const byDocument = new Map<string, SourceChunk[]>();
-  for (const chunk of aboveThreshold) {
+  for (const chunk of contentChunks) {
     const docKey = chunk.document_id ?? chunk.clean_title;
     const group = byDocument.get(docKey) ?? [];
     group.push(chunk);
