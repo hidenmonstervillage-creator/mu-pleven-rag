@@ -24,7 +24,11 @@ export const FACULTIES: Faculty[] = [
           'Хирургически болести',
           'Акушерство и гинекология',
           'Педиатрия',
-          'Неврология',
+          // 'Неврология' removed 2026-08-03 — duplicate of 'Нервни болести' below, which
+          // holds all the content (10 documents, 7,193 chunks, incl. a book titled
+          // "Неврология"). Introduced by c5d0b14 "Complete МУ-Плевен tree", which merged a
+          // second source without reconciling it against the names already present.
+          // fzg/sestra's 'Неврология и психиатрия' is a different faculty and untouched.
           'Психиатрия',
           'Инфекциозни болести, епидемиология и тропическа медицина',
           'Медицинска информатика',
@@ -37,7 +41,9 @@ export const FACULTIES: Faculty[] = [
           'Обща медицина',
           'Патоанатомия и цитопатология',
           'Национални диети и традиционни храни',
-          'Медицинска радиология',
+          // 'Медицинска радиология' removed 2026-08-03 — duplicate of the line below, which
+          // holds the content (2 documents, 920 chunks). Same c5d0b14 merge; here the newer
+          // name won the documents and the older one sat empty.
           'Рентгенология и радиология',
           'Клинична лаборатория',
           'Очни болести',
