@@ -66,6 +66,30 @@ function parseWaitMs(err: unknown, attempt: number): number {
 
 const MAX_RETRIES = 5;
 
+// ── Permanent 429s ────────────────────────────────────────────────────────────
+//
+// OpenAI returns 429 for two unrelated things:
+//   • genuine rate limiting        — transient, retrying is correct
+//   • an exhausted credit balance  — permanent, retrying is pointless
+//
+// Treating the second as the first cost ~22s per request on 2026-08-03: the ladder
+// slept 1+2+4+8s, made five doomed round trips, then threw. Because the chat route
+// had no top-level catch, that surfaced as a blank HTTP 500 after a 22-second
+// spinner. Fail immediately instead, with a message that names the real cause.
+//
+// The SDK exposes `code`/`type` on APIError; the regex is the fallback for a plain
+// Error carrying a stringified body.
+function isPermanentQuotaError(err: unknown): boolean {
+  const e = err as { code?: unknown; type?: unknown; message?: unknown };
+  const code = typeof e?.code === 'string' ? e.code : '';
+  const type = typeof e?.type === 'string' ? e.type : '';
+  if (code === 'credit_balance_exhausted' || code === 'insufficient_quota') return true;
+  if (type === 'insufficient_quota') return true;
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return /insufficient_quota|credit_balance_exhausted|no credits remaining|exceeded your current quota|billing/i
+    .test(msg);
+}
+
 async function embedWithRetry(texts: string[], batchNum: number): Promise<number[][]> {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -83,6 +107,15 @@ async function embedWithRetry(texts: string[], batchNum: number): Promise<number
 
       // Non-rate-limit errors propagate immediately — no point retrying.
       if (!is429) throw err;
+
+      // A 429 that means "out of credits" is permanent. Do not burn the ladder.
+      if (isPermanentQuotaError(err)) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `[embeddings] batch ${batchNum} aborted — OpenAI credit balance exhausted ` +
+          `(permanent 429, not retried): ${msg}`,
+        );
+      }
 
       // Last attempt exhausted — surface to outer error handler.
       if (attempt === MAX_RETRIES - 1) {

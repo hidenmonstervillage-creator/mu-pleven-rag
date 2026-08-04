@@ -11,6 +11,34 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
+// ── NDJSON notice ─────────────────────────────────────────────────────────────
+//
+// Any response this route gives — success, empty subject, or failure — has to speak
+// the same frame contract the client reads (app/page.tsx, components/ChatArea.tsx):
+// a sources frame, then text frames, then done. A plain JSON body hangs the reader.
+// Both non-answer paths go through here so neither can drift from that shape.
+function ndjsonNotice(text: string): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(JSON.stringify({ type: 'sources', sources: [] }) + '\n'));
+      controller.enqueue(encoder.encode(JSON.stringify({ type: 'text', content: text }) + '\n'));
+      controller.enqueue(encoder.encode(JSON.stringify({ type: 'done' }) + '\n'));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache' },
+  });
+}
+
+// Shown when the pipeline breaks for a technical reason. Deliberately worded so a
+// reader can tell it apart from the zero-coverage notice: it states the material
+// EXISTS, so an outage cannot be mistaken for a gap in the library.
+const TECHNICAL_FAILURE = (subject: string) =>
+  `Материалите по «${subject}» са налични, но заявката не може да бъде обработена ` +
+  'в момента поради временен технически проблем. Моля, опитайте отново след малко.';
+
 export async function POST(req: NextRequest) {
   const body: ChatRequest = await req.json();
   const { message, facultyId, specialtyId, subject, conversationHistory } = body;
@@ -38,28 +66,13 @@ export async function POST(req: NextRequest) {
   // components/ChatArea.tsx read: sources, then text, then done. Returning plain
   // JSON here would hang the client's stream reader.
   if (docsForSubject(facultyId, specialtyId, subject) === 0) {
-    const notice =
+    return ndjsonNotice(
       'Системата съдържа литературата от официалния конспект за дигитализация ' +
-      `на МУ-Плевен. За «${subject}» няма индексирани материали.`;
-
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'sources', sources: [] }) + '\n'));
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'text', content: notice }) + '\n'));
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'done' }) + '\n'));
-        controller.close();
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'application/x-ndjson',
-        'Cache-Control': 'no-cache',
-      },
-    });
+      `на МУ-Плевен. За «${subject}» няма индексирани материали.`,
+    );
   }
 
+  try {
   const supabase = createServiceClient();
 
   // Step 1: embed the user question
@@ -75,11 +88,11 @@ export async function POST(req: NextRequest) {
   });
 
   if (rpcError) {
-    console.error('RPC error:', rpcError);
-    return new Response(JSON.stringify({ error: 'Failed to retrieve context' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    // Was a plain JSON 500, which the client's NDJSON reader cannot parse — it
+    // surfaced as a dead spinner rather than a message. Same treatment as any other
+    // pre-stream failure now.
+    console.error('[chat] match_chunks RPC error', { facultyId, specialtyId, subject, rpcError });
+    return ndjsonNotice(TECHNICAL_FAILURE(subject));
   }
 
   // Step 2a: filter out low-relevance chunks (similarity < 0.2)
@@ -290,4 +303,20 @@ ${context}`;
       'Cache-Control': 'no-cache',
     },
   });
+
+  } catch (err) {
+    // Anything thrown BEFORE the stream opens — embedding, retrieval, rerank,
+    // building the request — used to escape as an unhandled exception, which Next
+    // turns into a 500 with an EMPTY body. The client's reader gets nothing and the
+    // UI sits on a spinner until it dies. On 2026-08-03 an exhausted OpenAI credit
+    // balance did exactly that for 22 seconds on every populated subject.
+    //
+    // Failures once the stream IS open are handled separately inside start().
+    console.error('[chat] pre-stream failure', {
+      facultyId, specialtyId, subject,
+      error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    return ndjsonNotice(TECHNICAL_FAILURE(subject));
+  }
 }
