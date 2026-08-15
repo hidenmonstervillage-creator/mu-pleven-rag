@@ -5,6 +5,7 @@ import { embedText } from '@/lib/embeddings';
 import { ChatRequest, SourceChunk } from '@/lib/types';
 import { docsForSubject } from '@/lib/subject-coverage';
 import { filterTocChunks } from '@/lib/toc-filter';
+import { enforceRateLimit, isHarnessRequest, remainingFor, resolveSession } from '@/lib/rate-limit';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -17,7 +18,7 @@ export const maxDuration = 60;
 // the same frame contract the client reads (app/page.tsx, components/ChatArea.tsx):
 // a sources frame, then text frames, then done. A plain JSON body hangs the reader.
 // Both non-answer paths go through here so neither can drift from that shape.
-function ndjsonNotice(text: string): Response {
+function ndjsonNotice(text: string, setCookie?: string | null): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
@@ -27,9 +28,12 @@ function ndjsonNotice(text: string): Response {
       controller.close();
     },
   });
-  return new Response(stream, {
-    headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache' },
+  const headers = new Headers({
+    'Content-Type': 'application/x-ndjson',
+    'Cache-Control': 'no-cache',
   });
+  if (setCookie) headers.set('Set-Cookie', setCookie);
+  return new Response(stream, { headers });
 }
 
 // Shown when the pipeline breaks for a technical reason. Deliberately worded so a
@@ -65,11 +69,41 @@ export async function POST(req: NextRequest) {
   // This still has to speak the NDJSON frame contract that app/page.tsx and
   // components/ChatArea.tsx read: sources, then text, then done. Returning plain
   // JSON here would hang the client's stream reader.
+  // The session id is resolved before any I/O so that every response below — the
+  // coverage notice included — can carry the Set-Cookie that mints it. Resolving it
+  // costs nothing and charges nothing.
+  const session = resolveSession(req);
+
   if (docsForSubject(facultyId, specialtyId, subject) === 0) {
     return ndjsonNotice(
       'Системата съдържа литературата от официалния конспект за дигитализация ' +
       `на МУ-Плевен. За «${subject}» няма индексирани материали.`,
+      session.setCookie,
     );
+  }
+
+  // Step 0-bis: courtesy rate limit.
+  //
+  // Deliberately AFTER the zero-coverage short-circuit — a question about a subject
+  // the library does not cover costs nothing to answer, so it must stay free and
+  // uncounted — and BEFORE the embedding call, which is the first request that
+  // spends money.
+  //
+  // Every failure inside enforceRateLimit is already fail-open; the try/catch here
+  // is the belt to that module's braces, so that not even an import-time or
+  // programming error in the limiter can block a request. See lib/rate-limit.ts.
+  let quotaRemaining: number | null = null;
+  if (!isHarnessRequest(req)) {
+    try {
+      const verdict = await enforceRateLimit(req, session.id);
+      if (!verdict.allowed && verdict.message) {
+        console.log('[chat] rate limit hit', { subject, used: verdict.used, limit: verdict.limit });
+        return ndjsonNotice(verdict.message, session.setCookie);
+      }
+      quotaRemaining = remainingFor(verdict);
+    } catch (err) {
+      console.error('[chat] rate limiter threw — allowing request', err);
+    }
   }
 
   try {
@@ -92,7 +126,7 @@ export async function POST(req: NextRequest) {
     // surfaced as a dead spinner rather than a message. Same treatment as any other
     // pre-stream failure now.
     console.error('[chat] match_chunks RPC error', { facultyId, specialtyId, subject, rpcError });
-    return ndjsonNotice(TECHNICAL_FAILURE(subject));
+    return ndjsonNotice(TECHNICAL_FAILURE(subject), session.setCookie);
   }
 
   // Step 2a: filter out low-relevance chunks (similarity < 0.2)
@@ -268,6 +302,18 @@ ${context}`;
       const sourcesPayload = JSON.stringify({ type: 'sources', sources }) + '\n';
       controller.enqueue(encoder.encode(sourcesPayload));
 
+      // Remaining daily turns, for a future quota indicator in the UI.
+      //
+      // This is an ADDITIVE frame type. The client parser (app/page.tsx) reads each
+      // line, parses it, and acts only on 'sources' and 'text' — any other type
+      // falls through both branches and is ignored, so shipping this does not
+      // require a client change and does not break the deployed bundle. Nothing
+      // renders it yet.
+      if (quotaRemaining !== null) {
+        const quotaPayload = JSON.stringify({ type: 'quota', remaining: quotaRemaining }) + '\n';
+        controller.enqueue(encoder.encode(quotaPayload));
+      }
+
       try {
         const stream = await openai.chat.completions.create({
           model: 'gpt-4o',
@@ -297,12 +343,13 @@ ${context}`;
     },
   });
 
-  return new Response(readableStream, {
-    headers: {
-      'Content-Type': 'application/x-ndjson',
-      'Cache-Control': 'no-cache',
-    },
+  const streamHeaders = new Headers({
+    'Content-Type': 'application/x-ndjson',
+    'Cache-Control': 'no-cache',
   });
+  if (session.setCookie) streamHeaders.set('Set-Cookie', session.setCookie);
+
+  return new Response(readableStream, { headers: streamHeaders });
 
   } catch (err) {
     // Anything thrown BEFORE the stream opens — embedding, retrieval, rerank,
@@ -317,6 +364,6 @@ ${context}`;
       error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
       stack: err instanceof Error ? err.stack : undefined,
     });
-    return ndjsonNotice(TECHNICAL_FAILURE(subject));
+    return ndjsonNotice(TECHNICAL_FAILURE(subject), session.setCookie);
   }
 }
