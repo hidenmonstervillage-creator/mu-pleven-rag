@@ -6,8 +6,10 @@ import { ChatRequest, SourceChunk } from '@/lib/types';
 import { docsForSubject } from '@/lib/subject-coverage';
 import { filterTocChunks } from '@/lib/toc-filter';
 import {
-  enforceRateLimit, isHarnessRequest, isQuotaFailureTest, remainingFor, resolveSession,
+  enforceRateLimit, isGateDisabled, isGateFailureTest, isHarnessRequest, isQuotaFailureTest,
+  remainingFor, resolveSession,
 } from '@/lib/rate-limit';
+import { buildSourceProfile, evaluateGate, questionStemsOf } from '@/lib/grounding-gate';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -41,6 +43,15 @@ function ndjsonNotice(text: string, setCookie?: string | null): Response {
 // Shown when the pipeline breaks for a technical reason. Deliberately worded so a
 // reader can tell it apart from the zero-coverage notice: it states the material
 // EXISTS, so an outage cannot be mistaken for a gap in the library.
+// Shown when the answer the model produced is not supported by the material that
+// was retrieved. Deliberately blames THE SOURCES FOUND rather than the subject —
+// the zero-coverage notice is the one that says a subject has nothing, and the two
+// must not be confusable. It also has to read correctly next to source cards,
+// which will already be on screen: the cards go out before the answer does.
+const GROUNDING_REFUSAL =
+  'Намерените източници не съдържат достатъчно информация, за да бъде отговорено ' +
+  'на този въпрос. Опитайте да формулирате въпроса по-конкретно или изберете друга тема.';
+
 const TECHNICAL_FAILURE = (subject: string) =>
   `Материалите по «${subject}» са налични, но заявката не може да бъде обработена ` +
   'в момента поради временен технически проблем. Моля, опитайте отново след малко.';
@@ -329,6 +340,44 @@ ${context}`;
         controller.enqueue(encoder.encode(quotaPayload));
       }
 
+      // ── Grounding gate ──────────────────────────────────────────────────
+      //
+      // When retrieval misses the topic, gpt-4o answers from training knowledge
+      // behind real-looking citations — 13 times in the 140-run triage sweep, every
+      // one of them citing same-discipline material. The gate measures how much of
+      // the answer's own vocabulary appears in the retrieved text and refuses when
+      // too little does. See lib/grounding-gate.ts for the thresholds and the
+      // evidence behind them, including what it does NOT cover.
+      //
+      // Cost of the mechanism: text is held back until the gate can decide. Most
+      // answers clear at 400 characters and stream from there; the rest are held to
+      // 800. Nothing is ever un-said — a refusal only happens while the buffer is
+      // still private.
+      const gateOn = !isGateDisabled(req);
+      const forceGateFailure = isGateFailureTest(req);
+      const gateProfile = gateOn ? buildSourceProfile(sources.map((s) => s.content ?? '')) : null;
+      const gateQuestion = gateOn ? questionStemsOf(message) : null;
+
+      const emitText = (t: string) =>
+        controller.enqueue(encoder.encode(JSON.stringify({ type: 'text', content: t }) + '\n'));
+
+      let buffered = '';
+      let released = !gateOn;
+      let refused = false;
+
+      /** Any failure here releases what we have. The gate must never cost an answer. */
+      const runGate = (streamEnded: boolean) => {
+        try {
+          if (forceGateFailure) {
+            throw new Error('forced grounding-gate failure (x-mup-failtest: gate)');
+          }
+          return evaluateGate(buffered, streamEnded, gateProfile!, gateQuestion!);
+        } catch (err) {
+          console.error('[chat] grounding gate threw — releasing the answer unchanged', err);
+          return null;
+        }
+      };
+
       try {
         const stream = await openai.chat.completions.create({
           model: 'gpt-4o',
@@ -341,13 +390,54 @@ ${context}`;
         // Stream the text tokens
         for await (const chunk of stream) {
           const delta = chunk.choices[0]?.delta?.content ?? '';
-          if (delta) {
-            const textPayload = JSON.stringify({ type: 'text', content: delta }) + '\n';
-            controller.enqueue(encoder.encode(textPayload));
+          if (!delta) continue;
+
+          if (released) {
+            emitText(delta);
+            continue;
           }
+
+          buffered += delta;
+          const verdict = runGate(false);
+          if (verdict === null) { emitText(buffered); released = true; continue; }
+
+          if (verdict.action === 'refuse') {
+            console.log('[chat] grounding gate refused', {
+              facultyId, specialtyId, subject,
+              cov: verdict.cov, novelStems: verdict.novelStems, reason: verdict.reason,
+            });
+            emitText(GROUNDING_REFUSAL);
+            refused = true;
+            // Leaving the iterator aborts the upstream request, so a refused answer
+            // also stops being paid for at the point of refusal.
+            break;
+          }
+          if (verdict.action === 'release' || verdict.action === 'decline') {
+            emitText(buffered);
+            released = true;
+          }
+        }
+
+        // The answer finished before the gate reached its decision point.
+        if (!released && !refused) {
+          const verdict = runGate(true);
+          if (verdict !== null && verdict.action === 'refuse') {
+            console.log('[chat] grounding gate refused at stream end', {
+              facultyId, specialtyId, subject, cov: verdict.cov, reason: verdict.reason,
+            });
+            emitText(GROUNDING_REFUSAL);
+            refused = true;
+          } else {
+            emitText(buffered);
+          }
+          released = true;
         }
       } catch (err) {
         console.error('Generation failed after headers were sent:', err);
+        // Whatever the gate was still holding is flushed BEFORE the error notice.
+        // An upstream failure must not also cost the student the text that had
+        // already been produced.
+        if (!released && !refused && buffered) emitText(buffered);
         const msg = 'Възникна грешка при генерирането на отговора. Моля, опитайте отново.';
         controller.enqueue(encoder.encode(JSON.stringify({ type: 'text', content: msg }) + '\n'));
       }

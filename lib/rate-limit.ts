@@ -161,6 +161,25 @@ export function isQuotaFailureTest(req: NextRequest): boolean {
   return req.headers.get('x-mup-failtest') === '1';
 }
 
+/**
+ * Same gate order, same reasoning, for the grounding gate: a valid harness key
+ * first, then the flag. Makes the grounding gate throw so its fail-open path can
+ * be proven on a live deployment.
+ */
+export function isGateFailureTest(req: NextRequest): boolean {
+  if (!isHarnessRequest(req)) return false;
+  return req.headers.get('x-mup-failtest') === 'gate';
+}
+
+/**
+ * Turns the grounding gate off for one request, so the latency it costs can be
+ * measured as an A/B on the same question rather than estimated. Harness-only.
+ */
+export function isGateDisabled(req: NextRequest): boolean {
+  if (!isHarnessRequest(req)) return false;
+  return req.headers.get('x-mup-gate') === 'off';
+}
+
 // ── Quota calls ───────────────────────────────────────────────────────────────
 
 function withTimeout<T>(work: PromiseLike<T>, ms: number, label: string): Promise<T> {
