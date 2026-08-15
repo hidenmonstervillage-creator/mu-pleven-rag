@@ -8,6 +8,19 @@ interface MessageInputProps {
   onSubmit: () => void;
   disabled: boolean;
   placeholder?: string;
+  /** Remaining daily questions, or null when unknown — then nothing is shown. */
+  quotaRemaining?: number | null;
+}
+
+/**
+ * Every student gets the same daily allowance; showing what is left is meant to
+ * read as a fairness guarantee, not as a warning. Hence the muted styling and the
+ * plain wording — no colour change, no icon, no emphasis as the number falls.
+ */
+function quotaLabel(remaining: number): string {
+  if (remaining === 0) return 'Дневният лимит е достигнат';
+  if (remaining === 1) return 'Дневен лимит: остава 1 въпрос';
+  return `Дневен лимит: остават ${remaining} въпроса`;
 }
 
 export default function MessageInput({
@@ -16,6 +29,7 @@ export default function MessageInput({
   onSubmit,
   disabled,
   placeholder = 'Задайте въпрос...',
+  quotaRemaining = null,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -35,7 +49,8 @@ export default function MessageInput({
   };
 
   return (
-    <div className="flex items-end gap-3 px-4 py-4 border-t border-[#E5E7EB] bg-white">
+    <div className="border-t border-[#E5E7EB] bg-white">
+    <div className="flex items-end gap-3 px-4 pt-4">
       <textarea
         ref={textareaRef}
         value={value}
@@ -68,6 +83,16 @@ export default function MessageInput({
           </svg>
         )}
       </button>
+    </div>
+
+      {/* Rendered only when a well-formed quota frame has arrived. With no frame,
+          a malformed one, or an older server, this is null and the composer looks
+          exactly as it did before. */}
+      <div className="px-4 pb-3 pt-1.5 min-h-[10px]">
+        {typeof quotaRemaining === 'number' && (
+          <p className="text-[11px] text-gray-400 leading-none">{quotaLabel(quotaRemaining)}</p>
+        )}
+      </div>
     </div>
   );
 }

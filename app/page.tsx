@@ -46,6 +46,10 @@ export default function HomePage() {
   // Sources arrive in the first NDJSON frame, ahead of the first text token. Held in
   // state so the cards can render while the answer is still streaming.
   const [streamingSources, setStreamingSources] = useState<SourceChunk[]>([]);
+  // Remaining daily questions, from the optional {type:'quota'} frame. Null until
+  // a well-formed frame arrives, and it stays null if none ever does — the label
+  // is simply not rendered in that case.
+  const [quotaRemaining, setQuotaRemaining] = useState<number | null>(null);
   const [pdfViewerPayload, setPdfViewerPayload] = useState<PDFViewerPayload | null>(null);
   const [askedQuestion, setAskedQuestion] = useState('');
   const [askNonce, setAskNonce] = useState(0);
@@ -148,7 +152,18 @@ export default function HomePage() {
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          const parsed = JSON.parse(line) as { type: string; content?: string; sources?: SourceChunk[] };
+
+          // One unparseable line must not cost the whole answer. Before this,
+          // any malformed frame threw out of the read loop and the user lost the
+          // response that had already streamed — source cards included. Skip the
+          // bad line, keep reading, and leave a trace in the console.
+          let parsed: { type?: string; content?: string; sources?: SourceChunk[]; remaining?: unknown };
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            console.warn('Skipping unparseable NDJSON frame:', line.slice(0, 200));
+            continue;
+          }
 
           if (parsed.type === 'sources' && parsed.sources) {
             sources = parsed.sources;
@@ -156,6 +171,14 @@ export default function HomePage() {
           } else if (parsed.type === 'text' && parsed.content) {
             fullText += parsed.content;
             setStreamingContent(fullText);
+          } else if (parsed.type === 'quota') {
+            // Additive, optional frame. Anything that is not a sane count is
+            // ignored outright: the counter simply keeps its previous value and
+            // the rest of the response renders exactly as it always has.
+            const n = parsed.remaining;
+            if (typeof n === 'number' && Number.isFinite(n) && n >= 0) {
+              setQuotaRemaining(Math.floor(n));
+            }
           }
         }
       }
@@ -240,6 +263,7 @@ export default function HomePage() {
               ? `Задайте въпрос по ${subject}...`
               : 'Изберете предмет и задайте въпрос...'
           }
+          quotaRemaining={quotaRemaining}
         />
       </div>
 

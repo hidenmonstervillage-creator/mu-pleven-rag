@@ -80,6 +80,18 @@ export default function SourceCard({ source, onOpen }: SourceCardProps) {
             {expanded ? 'Покажи по-малко' : 'Покажи повече'}
           </button>
         )}
+
+        {/* Provenance.
+            Deliberately the UNIVERSAL claim — true of every document in the
+            corpus, because every one of them came off the university's own
+            digitisation. It says where the scan came from and nothing else: no
+            per-document legal status, no claim of конспект membership, because
+            no per-document evidence exists that could be produced on demand.
+            The конспект is named once, at corpus level, on the welcome screen.
+            Short on purpose: it must hold one line down to a ~320px card. */}
+        <p className="text-[11px] text-gray-400 leading-snug mt-0.5">
+          От дигитализирания фонд на МУ-Плевен
+        </p>
       </div>
     </div>
   );

@@ -75,9 +75,13 @@ export interface SessionResolution {
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
+// „всяка нощ" rather than „на следващия ден": the counter is keyed on the
+// database's own day, which is UTC (confirmed), so it rolls at 00:00 UTC =
+// 03:00 Europe/Sofia. Between midnight and 03:00 local, "tomorrow" would be
+// a false statement to a student who is already in tomorrow.
 const DAILY_LIMIT_MESSAGE = (cap: number) =>
   `Достигнахте дневния лимит от ${cap} въпроса. ` +
-  'Лимитът се възстановява автоматично на следващия ден. ' +
+  'Лимитът се възстановява автоматично всяка нощ. ' +
   'Благодарим Ви за разбирането.';
 
 const HOURLY_LIMIT_MESSAGE =
@@ -109,9 +113,13 @@ export function resolveSession(req: NextRequest): SessionResolution {
  * left to right as the request crosses hops. The client is the FIRST entry, so
  * that is what we take — using the whole header, or the last entry, would bucket
  * every student behind Vercel's own edge address and turn the ceiling into a
- * global one. The chain is also client-supplied and trivially spoofable; that is
- * acceptable here (see the note at the top of this file) but must never be
- * mistaken for identity.
+ * global one.
+ *
+ * Measured on production 2026-08-15: Vercel REWRITES this header at the edge. A
+ * request that sent a 3000-character value still bucketed under the true client
+ * address, so the chain we receive is not client-controlled and the IP ceiling
+ * cannot be shrugged off by spoofing it. That is a property of this deployment,
+ * not a guarantee to lean on — nothing here treats an IP as identity.
  */
 export function clientIp(req: NextRequest): string {
   const xff = req.headers.get('x-forwarded-for');
@@ -131,6 +139,26 @@ export function isHarnessRequest(req: NextRequest): boolean {
   const expected = process.env.HARNESS_BYPASS_KEY;
   if (!expected) return false;
   return req.headers.get('x-mup-harness-key') === expected;
+}
+
+/**
+ * Fail-open test hook.
+ *
+ * Production fail-open could not be proven from outside: the only lever available
+ * was an unreachable bucket key via x-forwarded-for, and Vercel rewrites that
+ * header. This hook closes that gap — it makes the quota call throw, and nothing
+ * else, so a deploy can be checked to still answer when the quota subsystem is
+ * broken.
+ *
+ * The gate order is the point: a VALID harness key must be present before
+ * x-mup-failtest is read at all. An ungated version of this would be an open
+ * bypass, since forcing an error is by definition allow-through. With
+ * HARNESS_BYPASS_KEY unset, isHarnessRequest() is false and the hook does not
+ * exist — same rule as the bypass itself.
+ */
+export function isQuotaFailureTest(req: NextRequest): boolean {
+  if (!isHarnessRequest(req)) return false;
+  return req.headers.get('x-mup-failtest') === '1';
 }
 
 // ── Quota calls ───────────────────────────────────────────────────────────────
@@ -154,7 +182,7 @@ const allowDegraded = (limit: number): QuotaVerdict => ({
  * unreachable database, unexpected payload shape — returns allowed:true. The only
  * way this returns allowed:false is an explicit allowed:false from the database.
  */
-async function consume(bucket: string, limit: number): Promise<QuotaVerdict> {
+async function consume(bucket: string, limit: number, forceFailure = false): Promise<QuotaVerdict> {
   // A cap of zero or less means the bucket is switched off, and the check is
   // skipped rather than delegated to the database. The RPC cannot express it:
   // its zero-guard sits on the ON CONFLICT update branch only, so the first
@@ -165,6 +193,13 @@ async function consume(bucket: string, limit: number): Promise<QuotaVerdict> {
   }
 
   try {
+    // The test hook throws from inside the real try block, so the request takes
+    // the same catch, the same log line and the same allow-by-default path a
+    // genuine outage would. Nothing outside this function is affected.
+    if (forceFailure) {
+      throw new Error(`forced quota failure for ${bucket} (x-mup-failtest)`);
+    }
+
     const supabase = createServiceClient();
     const { data, error } = await withTimeout(
       supabase.rpc('consume_daily_quota', { p_bucket: bucket, p_limit: limit }),
@@ -213,14 +248,17 @@ function hourStamp(now: Date): string {
 export async function enforceRateLimit(
   req: NextRequest,
   sessionId: string,
-  now: Date = new Date(),
+  opts: { forceFailure?: boolean; now?: Date } = {},
 ): Promise<QuotaVerdict> {
-  const ipVerdict = await consume(`ip:${clientIp(req)}:${hourStamp(now)}`, IP_HOURLY_CAP);
+  const now = opts.now ?? new Date();
+  const forceFailure = opts.forceFailure ?? false;
+
+  const ipVerdict = await consume(`ip:${clientIp(req)}:${hourStamp(now)}`, IP_HOURLY_CAP, forceFailure);
   if (!ipVerdict.allowed) {
     return { ...ipVerdict, message: HOURLY_LIMIT_MESSAGE };
   }
 
-  const sessionVerdict = await consume(`sess:${sessionId}`, SESSION_DAILY_CAP);
+  const sessionVerdict = await consume(`sess:${sessionId}`, SESSION_DAILY_CAP, forceFailure);
   if (!sessionVerdict.allowed) {
     return { ...sessionVerdict, message: DAILY_LIMIT_MESSAGE(SESSION_DAILY_CAP) };
   }

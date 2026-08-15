@@ -5,7 +5,9 @@ import { embedText } from '@/lib/embeddings';
 import { ChatRequest, SourceChunk } from '@/lib/types';
 import { docsForSubject } from '@/lib/subject-coverage';
 import { filterTocChunks } from '@/lib/toc-filter';
-import { enforceRateLimit, isHarnessRequest, remainingFor, resolveSession } from '@/lib/rate-limit';
+import {
+  enforceRateLimit, isHarnessRequest, isQuotaFailureTest, remainingFor, resolveSession,
+} from '@/lib/rate-limit';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -75,9 +77,16 @@ export async function POST(req: NextRequest) {
   const session = resolveSession(req);
 
   if (docsForSubject(facultyId, specialtyId, subject) === 0) {
+    // Wording matters here more than anywhere else in the product: this fires at
+    // the one moment the system has nothing to show. The previous text claimed
+    // the system CONTAINS the literature of the official конспект — a
+    // completeness claim, made precisely when the answer is empty, in front of
+    // the person most able to notice the contradiction. It now says only what is
+    // true: this subject has nothing yet, and the corpus is still growing.
+    // The конспект is named exactly once in the whole UI, on the welcome screen.
     return ndjsonNotice(
-      'Системата съдържа литературата от официалния конспект за дигитализация ' +
-      `на МУ-Плевен. За «${subject}» няма индексирани материали.`,
+      'За този предмет все още няма дигитализирана литература в системата. ' +
+      'Съдържанието се разширява с всяко ново дигитализиране от страна на МУ-Плевен.',
       session.setCookie,
     );
   }
@@ -92,10 +101,16 @@ export async function POST(req: NextRequest) {
   // Every failure inside enforceRateLimit is already fail-open; the try/catch here
   // is the belt to that module's braces, so that not even an import-time or
   // programming error in the limiter can block a request. See lib/rate-limit.ts.
+  //
+  // The fail-open test hook is the one case where a harness request is NOT waved
+  // through: it asks for the quota path to be run and to fail, so that a live
+  // deployment can be checked to still answer when the quota subsystem is broken.
+  // It is only reachable with a valid harness key (see isQuotaFailureTest).
   let quotaRemaining: number | null = null;
-  if (!isHarnessRequest(req)) {
+  const failureTest = isQuotaFailureTest(req);
+  if (!isHarnessRequest(req) || failureTest) {
     try {
-      const verdict = await enforceRateLimit(req, session.id);
+      const verdict = await enforceRateLimit(req, session.id, { forceFailure: failureTest });
       if (!verdict.allowed && verdict.message) {
         console.log('[chat] rate limit hit', { subject, used: verdict.used, limit: verdict.limit });
         return ndjsonNotice(verdict.message, session.setCookie);

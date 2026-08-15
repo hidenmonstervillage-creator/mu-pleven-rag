@@ -23,8 +23,19 @@ function WelcomeScreen() {
     <div className="flex flex-col items-center justify-center h-full py-16 px-6 text-center">
       <Logo className="w-20 h-20 mb-5" />
       <h1 className="text-2xl font-bold text-[#7B1C1C] mb-2">МУ-Плевен AI Library</h1>
-      <p className="text-gray-500 mb-10 max-w-md text-sm leading-relaxed">
+      <p className="text-gray-500 mb-4 max-w-md text-sm leading-relaxed">
         Изберете факултет, специалност и предмет от горното меню, след което задайте вашия академичен въпрос.
+      </p>
+
+      {/* Corpus-level scope statement — the ONE place the конспект is named
+          anywhere in the UI.
+          It is a claim about SUBJECT SCOPE, which is provable: all 74 populated
+          triples derive from the конспект. It deliberately does not name an
+          institutional digitisation programme — that is not ours to assert, and
+          the rector is the person who would know. Source cards carry only the
+          universal provenance line. */}
+      <p className="text-gray-400 mb-10 max-w-md text-xs leading-relaxed">
+        Библиотеката покрива предметите от официалния конспект на МУ-Плевен.
       </p>
 
       <div className="grid grid-cols-2 gap-3 max-w-lg w-full">
