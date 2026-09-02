@@ -10,6 +10,9 @@ interface MessageInputProps {
   placeholder?: string;
   /** Remaining daily questions, or null when unknown — then nothing is shown. */
   quotaRemaining?: number | null;
+  /** Persistent AI-usage disclosure shown under the composer. Always visible when
+   *  provided; omit it and nothing is rendered in its place. */
+  disclosure?: string;
 }
 
 /**
@@ -30,6 +33,7 @@ export default function MessageInput({
   disabled,
   placeholder = 'Задайте въпрос...',
   quotaRemaining = null,
+  disclosure,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -85,13 +89,24 @@ export default function MessageInput({
       </button>
     </div>
 
-      {/* Rendered only when a well-formed quota frame has arrived. With no frame,
-          a malformed one, or an older server, this is null and the composer looks
-          exactly as it did before. */}
-      <div className="px-4 pb-3 pt-1.5 min-h-[10px]">
-        {typeof quotaRemaining === 'number' && (
-          <p className="text-[11px] text-gray-400 leading-none">{quotaLabel(quotaRemaining)}</p>
+      {/* Footer under the composer: a persistent AI-usage disclosure, then the
+          optional remaining-quota hint. */}
+      <div className="px-4 pb-3 pt-1.5 space-y-1">
+        {/* AI disclosure — always visible, not dismissible. It is persistent, so
+            it can never cause a layout shift by appearing or disappearing. Wraps
+            to two or three lines on a narrow viewport, which is fine and stable. */}
+        {disclosure && (
+          <p className="text-[11px] text-gray-400 leading-snug">{disclosure}</p>
         )}
+        {/* Remaining daily questions — shown only when a well-formed quota frame
+            has arrived. The reserved height keeps its toggling from shifting the
+            layout above it. With no frame, a malformed one, or an older server,
+            this is null and the composer looks exactly as it did before. */}
+        <div className="min-h-[10px]">
+          {typeof quotaRemaining === 'number' && (
+            <p className="text-[11px] text-gray-400 leading-none">{quotaLabel(quotaRemaining)}</p>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -33,6 +33,12 @@ function deriveTitle(message: string): string {
   return message.length > 50 ? message.slice(0, 50) + '...' : message;
 }
 
+// Persistent AI-usage disclosure shown under the composer on the student library
+// chat. This surface answers only from the digitised konspekt literature, so the
+// notice states that scope and reminds the reader to check the cited source.
+const LIBRARY_DISCLOSURE =
+  'Разговаряте с AI асистент. Отговорите се базират само на литературата от официалния конспект на МУ-Плевен и могат да съдържат неточности — проверявайте цитирания източник.';
+
 export default function HomePage() {
   const [facultyId, setFacultyId] = useState('');
   const [specialtyId, setSpecialtyId] = useState('');
@@ -264,6 +270,7 @@ export default function HomePage() {
               : 'Изберете предмет и задайте въпрос...'
           }
           quotaRemaining={quotaRemaining}
+          disclosure={LIBRARY_DISCLOSURE}
         />
       </div>
 
