@@ -8,7 +8,7 @@ export default function Logo({ className }: { className?: string }) {
       <circle cx="50" cy="50" r="42" fill="none" stroke="#ffffff" strokeOpacity="0.35" strokeWidth="1.5" />
       <text
         x="50" y="50" textAnchor="middle" dominantBaseline="central"
-        fontFamily="Inter, system-ui, sans-serif" fontWeight="700" fontSize="38" fill="#ffffff"
+        fontFamily="var(--font-geist-sans), system-ui, sans-serif" fontWeight="700" fontSize="38" fill="#ffffff"
       >
         МУ
       </text>

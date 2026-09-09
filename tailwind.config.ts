@@ -13,7 +13,7 @@ const config: Config = {
         'brand-dark': '#6a1818',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
       },
     },
   },

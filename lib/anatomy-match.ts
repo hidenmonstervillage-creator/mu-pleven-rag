@@ -1,3 +1,5 @@
+// SERVER-ONLY: imported by app/api/anatomy/suggest only. Must never be pulled
+// into a client component (the build is grepped for its markers after each change).
 // ── Chat question → 3D anatomy topic matching ───────────────────────────────
 // Region/system synonyms (Bulgarian + English/Latin) for high-precision matches,
 // plus the generated distinctive-structure-token index for specific structures

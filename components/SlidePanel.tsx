@@ -11,55 +11,9 @@ interface SlidePanelProps {
   questionNonce?: number;  // bumped on every send so re-asks re-trigger
 }
 
-// ── Question → slide matching (accent-tolerant, light Bulgarian stemming) ──────
-
-const STOP = new Set([
-  'и', 'на', 'за', 'от', 'с', 'в', 'до', 'по', 'при', 'към', 'или', 'ми', 'ме',
-  'разкажи', 'кажи', 'какво', 'какви', 'каква', 'как', 'the', 'of', 'in', 'et',
-  'and', 'a', 'an', 'tell', 'me', 'about', 'what', 'tissue', 'тъкан',
-]);
-
-function normText(s: string): string {
-  return (s || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')  // strip combining diacritics
-    .replace(/[^a-z0-9Ѐ-ӿ]+/g, ' ')          // keep Latin, digits, Cyrillic
-    .trim();
-}
-
-// Strip common Bulgarian definite-article / plural / case endings.
-const BG_ENDINGS = ['овете', 'ищата', 'ията', 'ите', 'ята', 'ове', 'ът', 'ят', 'та', 'то', 'ето', 'ата', 'ия', 'а', 'о', 'е', 'и', 'ъ', 'я'];
-function stem(w: string): string {
-  for (const e of BG_ENDINGS) {
-    if (w.length > e.length + 2 && w.endsWith(e)) return w.slice(0, -e.length);
-  }
-  return w;
-}
-
-// Organ keywords are the CANONICAL base form — do NOT stem them (stemming e.g.
-// "аорта" → "аор" would break matching). Inflection is handled in tokenMatch,
-// where the (stemmed) query word starts-with the organ base.
-function keywords(str: string): string[] {
-  return normText(str).split(' ').filter((w) => w.length >= 3 && !STOP.has(w));
-}
-
-function tokenMatch(qw: string, k: string): boolean {
-  return qw === k || (k.length >= 4 && qw.startsWith(k)) || (qw.length >= 4 && k.startsWith(qw));
-}
-
-// A slide matches if a distinctive keyword (stem ≥6) of its organ or organ_bg is
-// present in the question; for organs made only of short words, require all of
-// them (keeps precision high — a missed suggestion is fine, a wrong one is not).
-function matchesQuestion(qWords: string[], slide: SubjectSlide): boolean {
-  const test = (str: string) => {
-    const kws = keywords(str);
-    if (kws.length === 0) return false;
-    const strong = kws.filter((k) => k.length >= 6);
-    if (strong.length > 0) return strong.some((k) => qWords.some((qw) => tokenMatch(qw, k)));
-    return kws.every((k) => qWords.some((qw) => tokenMatch(qw, k)));
-  };
-  return test(slide.organ_bg ?? '') || test(slide.organ ?? '');
-}
+// Question → slide matching lives server-side in lib/slides-match.ts, behind
+// POST /api/slides/suggest. The panel only maps the returned record_ids onto the
+// slides it has already loaded.
 
 // Student-facing "Микроскопски препарати" panel. Fully additive and self-managing:
 //   • Fetches the slides mapped to the currently-selected subject.
@@ -120,22 +74,28 @@ export default function SlidePanel({ facultyId, specialtyId, subject, question =
     );
   }, [slides, query]);
 
-  // Auto-suggest: on each new chat question, match it against the ALREADY-LOADED
-  // slides (no re-fetch) for the current subject. Up to 3 distinct organs.
+  // Auto-suggest: on each new chat question, ask the server (fired in parallel
+  // with /api/chat — the answer never waits on it) and map the returned
+  // record_ids onto the ALREADY-LOADED slides for the current subject. Up to 3
+  // distinct organs, chosen server-side.
   useEffect(() => {
     if (!question.trim() || slides.length === 0) { setSuggestions([]); return; }
-    const qWords = normText(question).split(' ').filter(Boolean).map(stem);
-    const matches: SubjectSlide[] = [];
-    const seen = new Set<string>();
-    for (const s of slides) {
-      if (!matchesQuestion(qWords, s)) continue;
-      const label = s.organ_bg || s.organ || s.slide_name || '';
-      if (seen.has(label)) continue;
-      seen.add(label);
-      matches.push(s);
-      if (matches.length >= 3) break;
-    }
-    setSuggestions(matches);
+    let cancelled = false; // a newer question supersedes this reply
+    fetch('/api/slides/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, subject, facultyId, specialtyId }),
+    })
+      .then((r) => r.json())
+      .then((json: { slideIds?: number[] }) => {
+        if (cancelled) return;
+        const picked = (json.slideIds ?? [])
+          .map((id) => slides.find((s) => s.record_id === id))
+          .filter((s): s is SubjectSlide => !!s);
+        setSuggestions(picked);
+      })
+      .catch(() => { if (!cancelled) setSuggestions([]); }); // no chip on failure
+    return () => { cancelled = true; };
   }, [questionNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Nothing to show for subjects without slides (or before first load completes).

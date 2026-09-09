@@ -14,24 +14,14 @@ interface PDFViewerProps {
   onClose: () => void;
 }
 
-// ── Hosts that serve PDFs over plain HTTP ─────────────────────────────────────
-// Browsers block HTTP resources loaded inside an HTTPS page (mixed-content).
-// For these hosts we route the fetch through our server-side proxy at
-// /api/pdf?url=… which re-serves the bytes over the site's own HTTPS.
-// Supabase-hosted files (ncpykcokbyzkgnmuvrgo.supabase.co) are already HTTPS
-// and are passed through unchanged.
-const HTTP_PROXY_HOSTS = new Set(['178.105.161.66']);
-
+// ── Every PDF is served through our own /api/pdf proxy ───────────────────────
+// Two reasons: Hetzner files are plain HTTP and would be blocked as mixed
+// content inside the HTTPS page, and routing Supabase Storage files through the
+// same handler keeps the student UI on a single origin. Which upstream hosts may
+// be fetched is decided server-side in app/api/pdf/route.ts — no host names
+// live in this bundle.
 function toProxiedUrl(storageUrl: string): string {
-  try {
-    const { hostname, protocol } = new URL(storageUrl);
-    if (protocol === 'http:' && HTTP_PROXY_HOSTS.has(hostname)) {
-      return `/api/pdf?url=${encodeURIComponent(storageUrl)}`;
-    }
-  } catch {
-    // Malformed URL — fall through and let the iframe fail visibly.
-  }
-  return storageUrl;
+  return `/api/pdf?url=${encodeURIComponent(storageUrl)}`;
 }
 
 export default function PDFViewer({ payload, onClose }: PDFViewerProps) {
@@ -52,8 +42,7 @@ export default function PDFViewer({ payload, onClose }: PDFViewerProps) {
     return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
-  // Route HTTP Hetzner URLs through the server-side proxy so that the HTTPS
-  // site can embed them without triggering a mixed-content block.
+  // All storage URLs go through /api/pdf (see toProxiedUrl above).
   const baseUrl  = payload?.storageUrl ? toProxiedUrl(payload.storageUrl) : '';
   const iframeSrc = baseUrl
     ? payload?.pageNumber

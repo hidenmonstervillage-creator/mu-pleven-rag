@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AnatomyModelEntry, AnatomyTopic } from '@/lib/anatomy-catalog';
-import { matchAnatomy, AnatomyMatch } from '@/lib/anatomy-match';
+import { AnatomyModelEntry, AnatomyTopic, findModel } from '@/lib/anatomy-catalog';
 
 interface AnatomySuggestProps {
   question: string;
@@ -10,16 +9,42 @@ interface AnatomySuggestProps {
   onOpenTopic: (model: AnatomyModelEntry, topic: AnatomyTopic) => void;
 }
 
-// Chat-driven 3D suggestion. On each sent message, matches the text against the
-// anatomy catalog (region/system synonyms + structure tokens, BG + Latin/English)
-// and surfaces a subtle, dismissible chip. Not subject-gated — anatomical
-// questions in ANY subject can surface it. Sits just above the slide suggestion.
+// Wire shape of one match from /api/anatomy/suggest.
+interface SuggestMatch { modelId: string; topicId: string; label: string; score: number }
+// Resolved against the client-side catalog for rendering / opening.
+interface ResolvedMatch { model: AnatomyModelEntry; topic: AnatomyTopic; label: string }
+
+// Chat-driven 3D suggestion. On each sent message the question is POSTed to
+// /api/anatomy/suggest — in parallel with /api/chat, never awaited by it — and
+// the reply (ids only) is resolved against the catalog the client already holds.
+// The matching itself (BG stemmer, synonym tables, structure-token index) lives
+// server-side. Surfaces a subtle, dismissible chip. Not subject-gated —
+// anatomical questions in ANY subject can surface it. Sits just above the slide
+// suggestion.
 export default function AnatomySuggest({ question, questionNonce, onOpenTopic }: AnatomySuggestProps) {
-  const [matches, setMatches] = useState<AnatomyMatch[]>([]);
+  const [matches, setMatches] = useState<ResolvedMatch[]>([]);
 
   useEffect(() => {
     if (!question.trim()) { setMatches([]); return; }
-    setMatches(matchAnatomy(question));
+    let cancelled = false; // a newer question supersedes this reply
+    fetch('/api/anatomy/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    })
+      .then((r) => r.json())
+      .then((json: { matches?: SuggestMatch[] }) => {
+        if (cancelled) return;
+        const resolved: ResolvedMatch[] = [];
+        for (const m of json.matches ?? []) {
+          const model = findModel(m.modelId);
+          const topic = model?.topics.find((t) => t.id === m.topicId);
+          if (model && topic) resolved.push({ model, topic, label: m.label });
+        }
+        setMatches(resolved);
+      })
+      .catch(() => { if (!cancelled) setMatches([]); }); // no chip on failure
+    return () => { cancelled = true; };
   }, [questionNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (matches.length === 0) return null;

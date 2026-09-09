@@ -5,13 +5,21 @@ export const maxDuration = 30;           // large PDFs can be slow to forward
 export const dynamic    = 'force-dynamic';
 
 // ── Allowlist ─────────────────────────────────────────────────────────────────
-// Only proxy PDFs served from our own Hetzner instance.  Any other host is
-// rejected with 400 so this route cannot be abused as an open proxy / SSRF
-// vector.  Supabase-hosted files are already on HTTPS and don't need proxying.
+// Only proxy PDFs from hosts we actually store documents on: our own Hetzner
+// instance (plain HTTP — the browser would block it as mixed content) and this
+// project's Supabase Storage. Anything else is rejected with 400 so this route
+// cannot be abused as an open proxy / SSRF vector. The allowlist lives here, on
+// the server, so no upstream host name ships in the client bundle.
 
-const ALLOWED_HOSTS = new Set([
+const ALLOWED_HOSTS = new Set<string>([
   '178.105.161.66',
 ]);
+try {
+  const supabaseHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname;
+  if (supabaseHost) ALLOWED_HOSTS.add(supabaseHost);
+} catch {
+  // Unset/malformed NEXT_PUBLIC_SUPABASE_URL — Supabase-hosted PDFs simply stay unproxied (400).
+}
 
 // ── GET /api/pdf?url=<encoded-hetzner-url> ────────────────────────────────────
 
@@ -40,7 +48,7 @@ export async function GET(req: NextRequest) {
 
   if (!ALLOWED_HOSTS.has(parsed.hostname)) {
     return new NextResponse(
-      `Forbidden: only ${Array.from(ALLOWED_HOSTS).join(', ')} may be proxied via this route.`,
+      'Forbidden: this host may not be proxied via this route.',
       { status: 400, headers: { 'Content-Type': 'text/plain' } },
     );
   }
