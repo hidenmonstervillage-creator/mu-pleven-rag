@@ -83,16 +83,7 @@ export default function AnatomyPanel({ subject, activeTopicId, onOpenTopic }: An
             <span className="text-white text-lg" aria-hidden="true">🦴</span>
             <div className="flex flex-col min-w-0">
               <span className="text-white font-semibold text-sm leading-tight">3D Анатомия</span>
-              {/* CC BY-SA attribution for both model sources (full text in title). */}
-              <span
-                className="text-slate-300 text-xs mt-0.5 truncate"
-                title={
-                  'Open3DModel (AnatomyTOOL) — CC BY-SA 4.0. ' +
-                  'BodyParts3D, © The Database Center for Life Science, licensed under CC Attribution-Share Alike 2.1 Japan.'
-                }
-              >
-                {ANATOMY_MODELS.length} модела · Open3DModel (CC BY-SA 4.0) · BodyParts3D (CC BY-SA 2.1 JP)
-              </span>
+              <span className="text-slate-300 text-xs mt-0.5 truncate">{ANATOMY_MODELS.length} модела</span>
             </div>
           </div>
           <button onClick={() => setOpen(false)} className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-white hover:bg-white/20" aria-label="Затвори">
@@ -178,6 +169,29 @@ export default function AnatomyPanel({ subject, activeTopicId, onOpenTopic }: An
             </div>
           )}
         </div>
+
+        {/* Model-source attribution (CC BY-SA obligation) — collapsed by default,
+            expands on click. Kept out of the header so nothing brands the panel. */}
+        <details className="flex-shrink-0 border-t border-gray-100 px-4 py-2 text-[11px] text-gray-400">
+          <summary className="cursor-pointer select-none hover:text-gray-600 hover:underline w-fit">Източници</summary>
+          <ul className="mt-1.5 space-y-1 leading-snug">
+            <li>
+              <a href="https://anatomytool.org/open3dmodel" target="_blank" rel="noopener noreferrer" className="hover:underline">AnatomyTOOL Open3DModel</a>
+              {' '}(G.J.R. Maat, E. Lee, LUMC et al.) —{' '}
+              <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" className="hover:underline">CC BY-SA 4.0</a>
+            </li>
+            <li>
+              <a href="https://lifesciencedb.jp/bp3d/" target="_blank" rel="noopener noreferrer" className="hover:underline">BodyParts3D</a>
+              , © The Database Center for Life Science —{' '}
+              <a href="https://creativecommons.org/licenses/by-sa/2.1/jp/" target="_blank" rel="noopener noreferrer" className="hover:underline">CC BY-SA 2.1 JP</a>
+            </li>
+            <li>
+              <a href="https://www.z-anatomy.com/" target="_blank" rel="noopener noreferrer" className="hover:underline">Z-Anatomy</a>
+              {' '}—{' '}
+              <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" className="hover:underline">CC BY-SA 4.0</a>
+            </li>
+          </ul>
+        </details>
       </div>
     </>
   );
