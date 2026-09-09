@@ -75,9 +75,7 @@ const REGIONS: RegionDef[] = [
   { syn: ['heart', 'cardiac', 'cor', 'сърце', 'сърдечен', 'предсърдие', 'камера на сърцето', 'сърдечни камери'], modelId: 'heart', region: 'Heart' },
   // organs (BodyParts3D)
   { syn: ['brain', 'cerebrum', 'encephalon', 'мозък', 'главен мозък', 'мозъчен'], modelId: 'brain', region: 'Brain' },
-  { syn: ['lung', 'lungs', 'pulmo', 'бял дроб', 'бели дробове', 'дробове'], modelId: 'lungs', region: 'Lungs' },
   { syn: ['kidney', 'kidneys', 'ren', 'бъбрек', 'бъбреци'], modelId: 'kidneys', region: 'Kidneys' },
-  { syn: ['liver', 'hepar', 'черен дроб', 'чернодробен'], modelId: 'liver', region: 'Liver' },
   // GI / endocrine / pelvic organs (BodyParts3D)
   { syn: ['pancreas', 'панкреас', 'задстомашна жлеза'], modelId: 'pancreas', region: 'Pancreas' },
   { syn: ['stomach', 'gaster', 'ventriculus', 'стомах', 'стомашен'], modelId: 'stomach', region: 'Stomach' },

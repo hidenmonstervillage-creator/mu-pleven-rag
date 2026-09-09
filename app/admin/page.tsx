@@ -5,13 +5,9 @@ import { FACULTIES } from '@/lib/faculties';
 import { Faculty, Specialty } from '@/lib/types';
 import SubjectCombobox from '@/components/SubjectCombobox';
 
-// Upload directly to the Cloudflare tunnel (HTTPS) — bypasses Vercel's 4.5 MB limit.
-// Update this constant whenever the ephemeral tunnel URL rotates.
-const HETZNER_UPLOAD_URL =
-  process.env.NEXT_PUBLIC_HETZNER_UPLOAD_URL ??
-  'https://pixels-clocks-reprint-increasingly.trycloudflare.com/upload';
-const HETZNER_API_KEY =
-  process.env.NEXT_PUBLIC_HETZNER_API_KEY ?? 'mup-upload-secret-2024';
+// Files upload directly to the Cloudflare tunnel (HTTPS) — bypasses Vercel's
+// 4.5 MB request limit. The tunnel URL and the upload key are NOT in this bundle:
+// they are fetched per batch from the admin-only /api/admin/upload-target route.
 
 // Transliterate Cyrillic → ASCII slug for Hetzner path segments
 function toStorageSlug(text: string): string {
@@ -315,8 +311,23 @@ export default function AdminPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Mutable ref — updated without re-render when tunnel URL rotates
-  const tunnelUrlRef = useRef(HETZNER_UPLOAD_URL);
+  // Upload target (tunnel URL + server-held key) from the protected
+  // /api/admin/upload-target route. Cached per session; re-resolved with
+  // refresh=true after a network failure (the quick-tunnel URL rotates).
+  const uploadTargetRef = useRef<{ uploadUrl: string; apiKey: string } | null>(null);
+  const fetchUploadTarget = useCallback(async (refresh: boolean) => {
+    const res = await fetch('/api/admin/upload-target', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ refresh }),
+    });
+    const data = await res.json().catch(() => ({})) as { uploadUrl?: string; apiKey?: string; error?: string };
+    if (!res.ok || !data.uploadUrl || !data.apiKey) {
+      throw new Error(data.error ?? `upload-target failed (${res.status})`);
+    }
+    uploadTargetRef.current = { uploadUrl: data.uploadUrl, apiKey: data.apiKey };
+    return uploadTargetRef.current;
+  }, []);
 
   // Duplicate-confirmation gates: entry.id → resolve(proceed: boolean)
   // The file's upload promise parks here while waiting for the user's click.
@@ -748,28 +759,26 @@ export default function AdminPage() {
         formData.append('subject',     toStorageSlug(sub));
         formData.append('file',        entry.file);
 
-        const doXhr = (url: string) =>
-          xhrUpload(url, formData, HETZNER_API_KEY, (pct) => {
+        const doXhr = async (refresh: boolean) => {
+          const target = (!refresh && uploadTargetRef.current) || await fetchUploadTarget(refresh);
+          return xhrUpload(target.uploadUrl, formData, target.apiKey, (pct) => {
             setUploadProgress((prev) => ({ ...prev, [entry.id]: pct }));
           });
+        };
 
         let uploadRes: XHRResponse;
         try {
-          uploadRes = await doXhr(tunnelUrlRef.current);
+          uploadRes = await doXhr(false);
         } catch (fetchErr) {
           const fetchMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
           if (fetchMsg === 'Failed to fetch') {
+            // The tunnel URL has probably rotated — re-resolve it server-side.
             patchEntry(entry.id, {
               uploadStatus:  'uploading',
               uploadMessage: 'Tunnel URL обновен, опитвам отново...',
             });
             setUploadProgress((prev) => ({ ...prev, [entry.id]: 0 }));
-            try {
-              const txt = await fetch('http://178.105.161.66/tunnel-url.txt').then((r) => r.text());
-              const newBase = txt.trim();
-              if (newBase) tunnelUrlRef.current = newBase + '/upload';
-            } catch { /* keep existing URL */ }
-            uploadRes = await doXhr(tunnelUrlRef.current);
+            uploadRes = await doXhr(true);
           } else {
             throw fetchErr;
           }

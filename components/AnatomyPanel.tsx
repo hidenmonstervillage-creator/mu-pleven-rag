@@ -185,11 +185,6 @@ export default function AnatomyPanel({ subject, activeTopicId, onOpenTopic }: An
               , © The Database Center for Life Science —{' '}
               <a href="https://creativecommons.org/licenses/by-sa/2.1/jp/" target="_blank" rel="noopener noreferrer" className="hover:underline">CC BY-SA 2.1 JP</a>
             </li>
-            <li>
-              <a href="https://www.z-anatomy.com/" target="_blank" rel="noopener noreferrer" className="hover:underline">Z-Anatomy</a>
-              {' '}—{' '}
-              <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" className="hover:underline">CC BY-SA 4.0</a>
-            </li>
           </ul>
         </details>
       </div>

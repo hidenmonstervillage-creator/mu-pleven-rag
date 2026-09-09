@@ -83,16 +83,18 @@ export async function DELETE(
 
     if (deleteErr) throw new Error(deleteErr.message);
 
-    // Best-effort: delete the physical file from Hetzner
+    // Best-effort: delete the physical file from Hetzner (skipped when the
+    // server-side key is not configured — there is no default key).
     try {
-      const storageUrl = String(doc.storage_url ?? '');
+      const hetznerKey = process.env.HETZNER_API_KEY;
+      const storageUrl = hetznerKey ? String(doc.storage_url ?? '') : '';
       // storage_url is like http://178.105.161.66/documents/fid/sid/subj/file.pdf
       const match = storageUrl.match(/\/documents\/(.+)$/);
       if (match) {
         await fetch(`http://178.105.161.66/documents/${match[1]}`, {
           method: 'DELETE',
           headers: {
-            'x-api-key': process.env.HETZNER_API_KEY ?? 'mup-upload-secret-2024',
+            'x-api-key': hetznerKey as string,
           },
         });
       }

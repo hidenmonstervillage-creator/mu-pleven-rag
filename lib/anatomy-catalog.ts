@@ -257,19 +257,9 @@ export const ANATOMY_MODELS: AnatomyModelEntry[] = [
       { id: 'brain-vent',  label: 'Ventricular system',  groups: ['ventricular system'],  region: 'Brain', system: 'brain' },
     ],
   },
-  {
-    // lungs.glb (BodyParts3D) — right/left lung. BodyParts3D "partof" has no
-    // separate lobe concepts, so lobes are not offered.
-    id: 'lungs',
-    file: 'lungs',
-    label: 'Lungs',
-    bodyRegion: 'Thoracic organs',
-    topics: [
-      { id: 'lungs-all', label: 'Lungs — everything', groups: [],             whole: true, region: 'Lungs' },
-      { id: 'lungs-r',   label: 'Right lung',         groups: ['right lung'], region: 'Lungs', system: 'lungs' },
-      { id: 'lungs-l',   label: 'Left lung',          groups: ['left lung'],  region: 'Lungs', system: 'lungs' },
-    ],
-  },
+  // lungs.glb and liver.glb stay on disk but are NOT offered: the files present
+  // are the low-occupancy BodyParts3D originals, not the reviewed rebuilds.
+  // Re-add the entries once the rebuilt models land.
   {
     // kidneys.glb (BodyParts3D) — right/left kidney (no cortex/medulla/pelvis
     // as separate "partof" concepts).
@@ -281,21 +271,6 @@ export const ANATOMY_MODELS: AnatomyModelEntry[] = [
       { id: 'kid-all', label: 'Kidneys — everything', groups: [],               whole: true, region: 'Kidneys' },
       { id: 'kid-r',   label: 'Right kidney',         groups: ['right kidney'], region: 'Kidneys', system: 'kidneys' },
       { id: 'kid-l',   label: 'Left kidney',          groups: ['left kidney'],  region: 'Kidneys', system: 'kidneys' },
-    ],
-  },
-  {
-    // liver.glb (BodyParts3D) — the two main lobes. Dropped: whole "liver"
-    // (container) and "caudate lobe" (⊆ left lobe). NOTE: the lobes span ~42 of
-    // the whole-liver's 60 element surfaces, so non-lobar structures (vessels,
-    // bare area, porta) are not included. Quadrate lobe absent from the source.
-    id: 'liver',
-    file: 'liver',
-    label: 'Liver (lobes)',
-    bodyRegion: 'Abdominal organs',
-    topics: [
-      { id: 'liver-all', label: 'Liver — everything', groups: [],                       whole: true, region: 'Liver' },
-      { id: 'liver-r',   label: 'Right lobe',         groups: ['right lobe of liver'],  region: 'Liver', system: 'liver' },
-      { id: 'liver-l',   label: 'Left lobe',          groups: ['left lobe of liver'],   region: 'Liver', system: 'liver' },
     ],
   },
   // ── Single/two-part BodyParts3D organs ────────────────────────────────────
